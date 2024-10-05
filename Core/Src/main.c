@@ -85,14 +85,18 @@ const uint16_t APPS1_RANK = 0;
 const uint16_t APPS2_RANK = 1;
 const uint16_t BSE_RANK = 2;
 
-const uint16_t APPS_ADC_MIN_VAL = 10;
-const uint16_t APPS_ADC_MAX_VAL = 4095;
+const uint16_t APPS_1_ADC_MIN_VAL = 10;
+const uint16_t APPS_1_ADC_MAX_VAL = 4095;
+
+const uint16_t APPS_2_ADC_MIN_VAL = 10;
+const uint16_t APPS_2_ADC_MAX_VAL = 4095;
 
 //Nm
 const float MIN_TORQUE = 0;
 const float MAX_TORQUE = 108;
 
 const float REGEN_BASELINE_TORQUE = 0;
+const float REGEN_MAX_TORQUE = -30;
 
 const uint16_t BSE_ADC_MIN_VAL = 0;
 const uint16_t BSE_ADC_MAX_VAL = 4095;
@@ -105,7 +109,7 @@ const uint16_t BRAKE_ACTIVATED_ADC_VAL = 100;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
-const uint16_t DMA_READ_TIMEOUT = 20;
+const uint16_t DMA_READ_TIMEOUT = 10;
 
 
 
@@ -173,19 +177,22 @@ void readAPPSandBSE(void)
 void calculateTorqueRequest(void)
 {
 
-	float appsValue = ((float)apps1Value + apps2Value)/2;
-	if(appsValue >= APPS_ADC_MIN_VAL){
-		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE))/(APPS_ADC_MAX_VAL-APPS_ADC_MIN_VAL) * appsValue + MIN_TORQUE;
+	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
+	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
+	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
+	if(appsValue >= 0){
+		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
 	}else{
-		requestedTorque = REGEN_BASELINE_TORQUE;
+		float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
 	}
 }
 
 void checkAPPSPlausibility(void)
 {
 
-  apps1_as_percent = ((float)apps1Value-APPS_ADC_MIN_VAL)/(APPS_ADC_MAX_VAL-APPS_ADC_MIN_VAL) * 100;
-  apps2_as_percent = ((float)apps2Value-APPS_ADC_MIN_VAL)/(APPS_ADC_MAX_VAL-APPS_ADC_MIN_VAL) * 100;
+  apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL) * 100;
+  apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL) * 100;
 
   if(abs(apps1_as_percent-apps2_as_percent)> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE){
 	  if(apps_plausible){
@@ -205,7 +212,9 @@ void checkCrossCheck(void)
 {
 
 	bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL) * 100;
-	float apps_as_percent = ((((float)apps1Value+apps2Value)/2)-APPS_ADC_MIN_VAL)/(APPS_ADC_MAX_VAL-APPS_ADC_MIN_VAL) * 100;
+	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL) * 100;
+	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL) * 100;
+	float apps_as_percent = ((float)apps1_as_percent+apps2_as_percent)/2;
 
 	if(apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT && bseValue > BRAKE_ACTIVATED_ADC_VAL){
 		if(cross_check_plausible){
