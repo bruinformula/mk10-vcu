@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 
 #include "can.h"
+#include "constants.h"
 #include "mcp2515.h"
 
 /* USER CODE END Includes */
@@ -76,45 +77,6 @@ static void MX_SPI3_Init(void);
 #define false 0
 #define true 1
 
-/*                    VCU Constants                      */
-
-
-
-/*                    VCU Constants End                     */
-const uint16_t APPS1_RANK = 0;
-const uint16_t APPS2_RANK = 1;
-const uint16_t BSE_RANK = 2;
-
-const uint16_t APPS_1_ADC_MIN_VAL = 10;
-const uint16_t APPS_1_ADC_MAX_VAL = 4095;
-
-const uint16_t APPS_2_ADC_MIN_VAL = 10;
-const uint16_t APPS_2_ADC_MAX_VAL = 4095;
-
-//Nm
-const float MIN_TORQUE = 0;
-const float MAX_TORQUE = 108;
-
-const float REGEN_BASELINE_TORQUE = 0;
-const float REGEN_MAX_TORQUE = -30;
-
-const uint16_t BSE_ADC_MIN_VAL = 0;
-const uint16_t BSE_ADC_MAX_VAL = 4095;
-
-
-const uint16_t APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 10;
-const uint16_t APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
-
-const uint16_t BRAKE_ACTIVATED_ADC_VAL = 100;
-const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;
-const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
-
-const uint16_t DMA_READ_TIMEOUT = 10;
-
-
-
-
-
 /*                    VCU vars                      */
 
 uint16_t apps1Value;
@@ -134,7 +96,6 @@ uint32_t millis_since_dma_read;
 
 //cross check plausibility
 uint16_t cross_check_plausible = true;
-uint32_t millis_since_cross_check_implausible;
 
 uint32_t ADC_Reads[3];
 uint32_t ADC_BUFFER = 3;
@@ -144,6 +105,22 @@ float apps1_as_percent;
 float apps2_as_percent;
 float bse_as_percent;
 
+uint8_t readyToDrive = false;
+
+typedef struct {
+    int stateOfCharge;
+    int inverterActive;
+    int batteryTemperature;
+    int faultCode;
+    int cellVoltage;
+    // Add more fields as needed
+} BMSDiagnostics;  // The type alias is BMSDiagnostics
+
+BMSDiagnostics diagnostics;  // Declare a variable of type BMSDiagnostics
+
+
+
+struct can_frame driveCriticalCANRead;
 
 /*                    VCU vars end                    */
 
@@ -153,8 +130,16 @@ void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
 void checkCrossCheck(void);
 void sendTorqueCommand(void);
+void checkReadyToDrive(void);
+void updateBMSDiagnostics(void);
+
 /*            VCU Method Declarations  end         */
 
+
+
+void updateBMSDiagnostics(void){
+
+}
 
 void readAPPSandBSE(void)
 {
@@ -195,17 +180,14 @@ void checkAPPSPlausibility(void)
   apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL) * 100;
 
   if(abs(apps1_as_percent-apps2_as_percent)> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE){
-	  if(apps_plausible){
-		  millis_since_apps_implausible = HAL_GetTick();
-		  apps_plausible = false;
-		  requestedTorque = lastRequestedTorque;
-	  }else if (HAL_GetTick()-millis_since_apps_implausible>APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS){
-		  requestedTorque = 0;
-	  }
+	  millis_since_apps_implausible = HAL_GetTick();
+	  apps_plausible = false;
+	  requestedTorque = 0;
+  }else if(!apps_plausible && HAL_GetTick()-millis_since_apps_implausible<APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS){
+	  requestedTorque = 0;
   }else{
-      apps_plausible = true;
+	  apps_plausible = true;
   }
-
 }
 
 void checkCrossCheck(void)
@@ -217,12 +199,10 @@ void checkCrossCheck(void)
 	float apps_as_percent = ((float)apps1_as_percent+apps2_as_percent)/2;
 
 	if(apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT && bseValue > BRAKE_ACTIVATED_ADC_VAL){
-		if(cross_check_plausible){
-			  millis_since_cross_check_implausible = HAL_GetTick();
-			  cross_check_plausible = false;
-		  }else if (HAL_GetTick()-millis_since_cross_check_implausible>CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS){
-			  requestedTorque = 0;
-		  }
+	  cross_check_plausible = false;
+	  requestedTorque = 0;
+	}else if(!cross_check_plausible && apps_as_percent > CROSS_CHECK_RESTORATION_APPS_PERCENT){
+		requestedTorque = 0;
 	}else{
 		cross_check_plausible = true;
 	}
@@ -234,47 +214,28 @@ void sendTorqueCommand(void){
 	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
-	int msg0 = torqueValue & 0xFF;  // Low byte
-	int msg1 = (torqueValue >> 8) & 0xFF;  // High byte
+	char msg0 = torqueValue & 0xFF;  // Low byte
+	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
 
-	struct can_frame torqueMsg1;
-	torqueMsg1.can_id = 0x0C0;
-	torqueMsg1.can_dlc = 8;
-	for(int i=0;i<8;i++){
-		torqueMsg1.data[i] = (msg0 >> i) & 1;
+	struct can_frame torqueCommand;
+	torqueCommand.can_id = 0x0C0;
+	torqueCommand.can_dlc = 8;
+	torqueCommand.data[0] = msg0;
+	torqueCommand.data[1] = msg1;
+	torqueCommand.data[4] = 0;
+	torqueCommand.data[5] = 0;
+
+
+	MCP_sendMessage(&torqueCommand);
+
+
+}
+
+void checkReadyToDrive(void){
+	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
+	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
+	    readyToDrive = true;
 	}
-
-	struct can_frame torqueMsg2;
-	torqueMsg2.can_id = 0x0C1;
-	torqueMsg2.can_dlc = 8;
-	for(int i=0;i<8;i++){
-		torqueMsg2.data[i] = (msg1 >> i) & 1;
-	}
-
-	struct can_frame directionMsg;
-	struct can_frame inverterMsg;
-
-	directionMsg.can_id = 0x0C4;
-	directionMsg.can_dlc = 8;
-	directionMsg.data[0] = 1;
-	for(int i=1;i<8;i++){
-		directionMsg.data[i] = 0;
-	}
-
-	inverterMsg.can_id = 0x0C5;
-	inverterMsg.can_dlc = 8;
-	inverterMsg.data[0] = 1;
-	for(int i=1;i<8;i++){
-		inverterMsg.data[i] = 0;
-	}
-
-
-	MCP_sendMessage(&torqueMsg1);
-	MCP_sendMessage(&torqueMsg2);
-	MCP_sendMessage(&directionMsg);
-	MCP_sendMessage(&inverterMsg);
-
-
 }
 
 /* USER CODE END 0 */
@@ -321,6 +282,8 @@ int main(void)
   MCP_setBitrate(CAN_125KBPS);
   MCP_setNormalMode();
 
+  diagnostics.inverterActive = 0;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -330,15 +293,21 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	 MCP_readMessage(&driveCriticalCANRead);
 	 readAPPSandBSE();
 	 calculateTorqueRequest();
 	 checkAPPSPlausibility();
 	 checkCrossCheck();
+	 checkReadyToDrive();
+	 updateBMSDiagnostics();
 
 	 finalTorqueRequest = requestedTorque;
 	 lastRequestedTorque = requestedTorque;
 
-	 sendTorqueCommand();
+	 if(readyToDrive){
+		 sendTorqueCommand();
+	 }
+
 
   }
   /* USER CODE END 3 */
@@ -450,6 +419,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_8;
   sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -633,6 +603,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
