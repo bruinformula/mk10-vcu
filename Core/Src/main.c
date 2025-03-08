@@ -122,6 +122,9 @@ BMSDiagnostics diagnostics;  // Declare a variable of type BMSDiagnostics
 
 struct can_frame driveCriticalCANRead;
 
+const canid_t RPM_READ_ID; // TODO: move to a constants file and set to value of the motor id
+float motorRpm = 0;
+
 /*                    VCU vars end                    */
 
 /*            VCU Method Declarations           */
@@ -131,14 +134,13 @@ void checkAPPSPlausibility(void);
 void checkCrossCheck(void);
 void sendTorqueCommand(void);
 void checkReadyToDrive(void);
-void updateBMSDiagnostics(void);
 
 /*            VCU Method Declarations  end         */
 
 
-
-void updateBMSDiagnostics(void){
-
+//TODO: I have no idea if this is what this function is supposed to do, it doesn't feel correct, but it's all I could do with the info provided
+void updateRpm(struct can_frame *rpmReadFrame){
+	motorRpm = (float)(rpmReadFrame->data[0] | (rpmReadFrame->data[1] << 8));
 }
 
 void readAPPSandBSE(void)
@@ -165,9 +167,36 @@ void calculateTorqueRequest(void)
 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
 	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
 	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
-	if(appsValue >= 0){
-		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
-	}else{
+	if(appsValue > 0){
+		int numPedalSteps = 10;
+		int numRpmSteps = 10;
+
+		float pedalStepSize = 100 / (numPedalSteps - 1);
+		float rpmStepSize = MAX_RPM / (numRpmSteps - 1);
+
+		int pedalLowIndx = (int)(appsValue/pedalStepSize);
+		int pedalHighIndx = pedalLowIndx + 1;
+		if (pedalHighIndx >= numPedalSteps) pedalHighIndx = numPedalSteps - 1;
+
+		int rpmLowIndx = (int)(motorRpm / rpmStepSize);
+		int rpmHighIndx = rpmLowIndx + 1;
+		if (rpmHighIndx >= numRpmSteps) rpmHighIndx = numRpmSteps - 1;
+
+	    float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];  // Lower-left
+	    float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx]; // Upper-left
+	    float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx]; // Lower-right
+	    float T11 = TORQUE_ARRAY[pedalHighIndx][rpmHighIndx]; // Upper-right
+
+	    // Compute interpolation weights
+	    float pedalLerp = (appsValue - (pedalLowIndx * pedalStepSize)) / pedalStepSize;
+	    float rpmLerp = (motorRpm - (rpmLowIndx * rpmStepSize)) / rpmStepSize;
+
+	    float torqueLow = T00 + (T01 - T00) * rpmLerp;
+	    float torqueHigh = T10 + (T11 - T10) * rpmLerp;
+
+		requestedTorque =  torqueLow + (torqueHigh - torqueLow) * pedalLerp;
+
+	}else if(appsValue < 0){
 		float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
 		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
 	}
@@ -299,7 +328,9 @@ int main(void)
 	 checkAPPSPlausibility();
 	 checkCrossCheck();
 	 checkReadyToDrive();
-	 updateBMSDiagnostics();
+	 if(driveCriticalCANRead.can_id == RPM_READ_ID){
+		 updateRpm(&driveCriticalCANRead);
+	 }
 
 	 finalTorqueRequest = requestedTorque;
 	 lastRequestedTorque = requestedTorque;
