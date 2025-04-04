@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2024 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -22,9 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#include "can.h"
+#include "CANSPI.h"
 #include "constants.h"
 #include "mcp2515.h"
+#include <stdio.h>
+
 
 /* USER CODE END Includes */
 
@@ -35,6 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
 /* USER CODE END PD */
 
@@ -54,7 +57,8 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uCAN_MSG txMessage;
+uCAN_MSG rxMessage;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -120,7 +124,7 @@ BMSDiagnostics diagnostics;  // Declare a variable of type BMSDiagnostics
 
 
 
-struct can_frame driveCriticalCANRead;
+//struct can_frame driveCriticalCANRead;
 
 /*                    VCU vars end                    */
 
@@ -134,6 +138,7 @@ void checkReadyToDrive(void);
 void updateBMSDiagnostics(void);
 
 /*            VCU Method Declarations  end         */
+
 
 
 
@@ -209,27 +214,27 @@ void checkCrossCheck(void)
 
 }
 
-void sendTorqueCommand(void){
-
-	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
-
-	// Break the torqueValue into two bytes (little-endian)
-	char msg0 = torqueValue & 0xFF;  // Low byte
-	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
-
-	struct can_frame torqueCommand;
-	torqueCommand.can_id = 0x0C0;
-	torqueCommand.can_dlc = 8;
-	torqueCommand.data[0] = msg0;
-	torqueCommand.data[1] = msg1;
-	torqueCommand.data[4] = 0;
-	torqueCommand.data[5] = 0;
-
-
-	MCP_sendMessage(&torqueCommand);
-
-
-}
+//void sendTorqueCommand(void){
+//
+//	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
+//
+//	// Break the torqueValue into two bytes (little-endian)
+//	char msg0 = torqueValue & 0xFF;  // Low byte
+//	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
+//
+//	struct can_frame torqueCommand;
+//	torqueCommand.can_id = 0x0C0;
+//	torqueCommand.can_dlc = 8;
+//	torqueCommand.data[0] = msg0;
+//	torqueCommand.data[1] = msg1;
+//	torqueCommand.data[4] = 0;
+//	torqueCommand.data[5] = 0;
+//
+//
+//	MCP_sendMessage(&torqueCommand);
+//
+//
+//}
 
 void checkReadyToDrive(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
@@ -278,9 +283,12 @@ int main(void)
 
   HAL_TIM_Base_Start(&htim3);
 
-  MCP_reset();
-  MCP_setBitrate(CAN_125KBPS);
-  MCP_setNormalMode();
+  /* initalized to be 500kbps, see canspi.c line 131-133 for details */
+  if (CANSPI_Initialize() != true)
+  {
+	  Error_Handler();
+  }
+
 
   diagnostics.inverterActive = 0;
 
@@ -288,26 +296,40 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	  txMessage.frame.id = 0x0A;
+	  txMessage.frame.dlc = 8;
+	  txMessage.frame.data0 = 0;
+	  txMessage.frame.data1 = 1;
+	  txMessage.frame.data2 = 2;
+	  txMessage.frame.data3 = 3;
+	  txMessage.frame.data4 = 4;
+	  txMessage.frame.data5 = 5;
+	  txMessage.frame.data6 = 6;
+	  txMessage.frame.data7 = 7;
+	  CANSPI_Transmit(&txMessage);
+//	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	 MCP_readMessage(&driveCriticalCANRead);
-	 readAPPSandBSE();
-	 calculateTorqueRequest();
-	 checkAPPSPlausibility();
-	 checkCrossCheck();
-	 checkReadyToDrive();
-	 updateBMSDiagnostics();
 
-	 finalTorqueRequest = requestedTorque;
-	 lastRequestedTorque = requestedTorque;
-
-	 if(readyToDrive){
-		 sendTorqueCommand();
-	 }
-
+  while (1)
+  {
+	  /* USER CODE BEGIN WHILE */
+	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	  txMessage.frame.id = 0x0A;
+	  txMessage.frame.dlc = 8;
+	  txMessage.frame.data0 = 0;
+	  txMessage.frame.data1 = 1;
+	  txMessage.frame.data2 = 2;
+	  txMessage.frame.data3 = 3;
+	  txMessage.frame.data4 = 4;
+	  txMessage.frame.data5 = 5;
+	  txMessage.frame.data6 = 6;
+	  txMessage.frame.data7 = 7;
+	  CANSPI_Transmit(&txMessage);
+//	  HAL_Delay(100);
+    /* USER CODE END WHILE */
 
   }
   /* USER CODE END 3 */
@@ -335,9 +357,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 16;
-  RCC_OscInitStruct.PLL.PLLN = 336;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 84;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -453,7 +475,7 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -580,7 +602,16 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, LED1_Pin|CAN2_CS_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(MCP2515_RESET_GPIO_Port, MCP2515_RESET_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CAN_CS_GPIO_Port, CAN_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
@@ -591,12 +622,40 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
+  /*Configure GPIO pin : LED1_Pin */
+  GPIO_InitStruct.Pin = LED1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : CAN2_CS_Pin */
+  GPIO_InitStruct.Pin = CAN2_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MCP2515_RESET_Pin */
+  GPIO_InitStruct.Pin = MCP2515_RESET_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MCP2515_RESET_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LED2_Pin */
+  GPIO_InitStruct.Pin = LED2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : CAN_CS_Pin */
+  GPIO_InitStruct.Pin = CAN_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(CAN_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB4 */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
@@ -616,7 +675,15 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* shit for printf support */
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the LPUART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
 
+  return ch;
+}
 /* USER CODE END 4 */
 
 /**
