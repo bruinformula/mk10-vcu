@@ -25,6 +25,8 @@
 #include "CANSPI.h"
 #include "constants.h"
 #include "mcp2515.h"
+#include <stdio.h>
+
 
 /* USER CODE END Includes */
 
@@ -35,6 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
 /* USER CODE END PD */
 
@@ -135,6 +138,7 @@ void checkReadyToDrive(void);
 void updateBMSDiagnostics(void);
 
 /*            VCU Method Declarations  end         */
+
 
 
 
@@ -278,7 +282,12 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_Base_Start(&htim3);
-  CANSPI_Initialize();
+
+  /* initalized to be 500kbps, see canspi.c line 131-133 for details */
+  if (CANSPI_Initialize() != true)
+  {
+	  Error_Handler();
+  }
 
 
   diagnostics.inverterActive = 0;
@@ -287,9 +296,6 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE BEGIN 3 */
 	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	  txMessage.frame.id = 0x0A;
 	  txMessage.frame.dlc = 8;
@@ -302,6 +308,27 @@ int main(void)
 	  txMessage.frame.data6 = 6;
 	  txMessage.frame.data7 = 7;
 	  CANSPI_Transmit(&txMessage);
+//	  HAL_Delay(100);
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+
+  while (1)
+  {
+	  /* USER CODE BEGIN WHILE */
+	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	  txMessage.frame.id = 0x0A;
+	  txMessage.frame.dlc = 8;
+	  txMessage.frame.data0 = 0;
+	  txMessage.frame.data1 = 1;
+	  txMessage.frame.data2 = 2;
+	  txMessage.frame.data3 = 3;
+	  txMessage.frame.data4 = 4;
+	  txMessage.frame.data5 = 5;
+	  txMessage.frame.data6 = 6;
+	  txMessage.frame.data7 = 7;
+	  CANSPI_Transmit(&txMessage);
+//	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
   }
@@ -331,7 +358,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 64;
+  RCC_OscInitStruct.PLL.PLLN = 84;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -375,7 +402,7 @@ static void MX_ADC1_Init(void)
   /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
@@ -448,7 +475,7 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -628,7 +655,15 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* shit for printf support */
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the LPUART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
 
+  return ch;
+}
 /* USER CODE END 4 */
 
 /**

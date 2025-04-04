@@ -50,6 +50,10 @@ void CANSPI_Sleep(void)
 /* Initialize CAN */
 bool CANSPI_Initialize(void)
 {
+
+  MCP2515_Reset();
+  HAL_Delay(10);
+
   RXF0 RXF0reg;
   RXF1 RXF1reg;
   RXF2 RXF2reg;
@@ -107,6 +111,8 @@ bool CANSPI_Initialize(void)
     return false;
   }
     
+
+
   /* Change mode as configuration mode */
   if(!MCP2515_SetConfigMode())
   {
@@ -128,7 +134,7 @@ bool CANSPI_Initialize(void)
   MCP2515_WriteByte(MCP2515_RXB1CTRL, 0x01);    //Accept Filter 1
       
   /* 
-  * tq = 2 * (brp(0) + 1) / 16000000 = 0.125us
+  * tq = 2 * (brp(0) + 1) / 16,000,000 = 0.125us //assuming 16MHz oscillator
   * tbit = (SYNC_SEG(1 fixed) + PROP_SEG + PS1 + PS2)
   * tbit = 1tq + 5tq + 6tq + 4tq = 16tq
   * 16tq = 2us = 500kbps
@@ -137,7 +143,7 @@ bool CANSPI_Initialize(void)
   /* 00(SJW 1tq) 000000 */  
   MCP2515_WriteByte(MCP2515_CNF1, 0x00);
   
-  /* 1 1 100(5tq) 101(6tq) */  
+  /* 1 1 100(5tq) 101(6tq) */   //used to be 0xE5
   MCP2515_WriteByte(MCP2515_CNF2, 0xE5);
   
   /* 1 0 000 011(4tq) */  
@@ -161,7 +167,10 @@ uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
   idReg.tempEID0 = 0;
   
   ctrlStatus.ctrl_status = MCP2515_ReadStatus();
-  
+  uint8_t dingus = ctrlStatus.ctrl_status; //for use w stm32 debugger lol
+  uint8_t dingus2 = MCP2515_ReadByte(MCP2515_CANCTRL);
+  uint8_t efl = MCP2515_ReadByte(MCP2515_EFLG);
+
   /* Finding empty buffer */
   if (ctrlStatus.TXB0REQ != 1)
   {

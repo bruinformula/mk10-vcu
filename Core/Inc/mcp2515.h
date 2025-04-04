@@ -47,7 +47,7 @@
 #define MCP2515_RTS_TX1         0x82
 #define MCP2515_RTS_TX2         0x84
 #define MCP2515_RTS_ALL         0x87
-#define MCP2515_READ_STATUS     0xA0
+#define MCP2515_READ_STATUS     0xA0 //code for READ STATUS instruction
 #define MCP2515_RX_STATUS       0xB0
 #define MCP2515_BIT_MOD         0x05
 
