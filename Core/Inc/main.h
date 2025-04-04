@@ -59,6 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define B1_Pin GPIO_PIN_13
 #define B1_GPIO_Port GPIOC
+#define CAN2_CS_Pin GPIO_PIN_1
+#define CAN2_CS_GPIO_Port GPIOC
 #define USART_TX_Pin GPIO_PIN_2
 #define USART_TX_GPIO_Port GPIOA
 #define USART_RX_Pin GPIO_PIN_3
@@ -71,6 +73,12 @@ void Error_Handler(void);
 #define TCK_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define LED1_Pin GPIO_PIN_8
+#define LED1_GPIO_Port GPIOA
+#define LED2_Pin GPIO_PIN_9
+#define LED2_GPIO_Port GPIOA
+#define CAN_CS_Pin GPIO_PIN_1
+#define CAN_CS_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 

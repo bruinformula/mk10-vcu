@@ -22,7 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#include "can.h"
+#include "CANSPI.h"
 #include "constants.h"
 #include "mcp2515.h"
 
@@ -54,7 +54,8 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uCAN_MSG txMessage;
+uCAN_MSG rxMessage;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -120,7 +121,7 @@ BMSDiagnostics diagnostics;  // Declare a variable of type BMSDiagnostics
 
 
 
-struct can_frame driveCriticalCANRead;
+//struct can_frame driveCriticalCANRead;
 
 /*                    VCU vars end                    */
 
@@ -209,27 +210,27 @@ void checkCrossCheck(void)
 
 }
 
-void sendTorqueCommand(void){
-
-	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
-
-	// Break the torqueValue into two bytes (little-endian)
-	char msg0 = torqueValue & 0xFF;  // Low byte
-	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
-
-	struct can_frame torqueCommand;
-	torqueCommand.can_id = 0x0C0;
-	torqueCommand.can_dlc = 8;
-	torqueCommand.data[0] = msg0;
-	torqueCommand.data[1] = msg1;
-	torqueCommand.data[4] = 0;
-	torqueCommand.data[5] = 0;
-
-
-	MCP_sendMessage(&torqueCommand);
-
-
-}
+//void sendTorqueCommand(void){
+//
+//	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
+//
+//	// Break the torqueValue into two bytes (little-endian)
+//	char msg0 = torqueValue & 0xFF;  // Low byte
+//	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
+//
+//	struct can_frame torqueCommand;
+//	torqueCommand.can_id = 0x0C0;
+//	torqueCommand.can_dlc = 8;
+//	torqueCommand.data[0] = msg0;
+//	torqueCommand.data[1] = msg1;
+//	torqueCommand.data[4] = 0;
+//	torqueCommand.data[5] = 0;
+//
+//
+//	MCP_sendMessage(&torqueCommand);
+//
+//
+//}
 
 void checkReadyToDrive(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
@@ -277,10 +278,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_Base_Start(&htim3);
+  CANSPI_Initialize();
 
-  MCP_reset();
-  MCP_setBitrate(CAN_125KBPS);
-  MCP_setNormalMode();
 
   diagnostics.inverterActive = 0;
 
@@ -290,25 +289,20 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
-	 MCP_readMessage(&driveCriticalCANRead);
-	 readAPPSandBSE();
-	 calculateTorqueRequest();
-	 checkAPPSPlausibility();
-	 checkCrossCheck();
-	 checkReadyToDrive();
-	 updateBMSDiagnostics();
-
-	 finalTorqueRequest = requestedTorque;
-	 lastRequestedTorque = requestedTorque;
-
-	 if(readyToDrive){
-		 sendTorqueCommand();
-	 }
-
-
+	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	  txMessage.frame.id = 0x0A;
+	  txMessage.frame.dlc = 8;
+	  txMessage.frame.data0 = 0;
+	  txMessage.frame.data1 = 1;
+	  txMessage.frame.data2 = 2;
+	  txMessage.frame.data3 = 3;
+	  txMessage.frame.data4 = 4;
+	  txMessage.frame.data5 = 5;
+	  txMessage.frame.data6 = 6;
+	  txMessage.frame.data7 = 7;
+	  CANSPI_Transmit(&txMessage);
+	/* USER CODE END WHILE */
   }
   /* USER CODE END 3 */
 }
@@ -580,6 +574,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -590,6 +587,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : CAN2_CS_Pin */
+  GPIO_InitStruct.Pin = CAN2_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
