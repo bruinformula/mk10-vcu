@@ -144,11 +144,11 @@ bool CANSPI_Initialize(void)
   MCP2515_WriteByte(MCP2515_CNF1, 0x00);
   
   /* 1 1 100(5tq) 101(6tq) */   //used to be 0xE5
-  MCP2515_WriteByte(MCP2515_CNF2, 0xE5);
+  MCP2515_WriteByte(MCP2515_CNF2, 0xF0);
   
   /* 1 0 000 011(4tq) */  
   MCP2515_WriteByte(MCP2515_CNF3, 0x83);
-  
+
   /* Normal 모드로 설정 */
   if(!MCP2515_SetNormalMode())
     return false;
@@ -170,6 +170,10 @@ uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
   uint8_t dingus = ctrlStatus.ctrl_status; //for use w stm32 debugger lol
   uint8_t dingus2 = MCP2515_ReadByte(MCP2515_CANCTRL);
   uint8_t efl = MCP2515_ReadByte(MCP2515_EFLG);
+  uint8_t txb0ctrl = MCP2515_ReadByte(MCP2515_TXB0CTRL);
+  uint8_t txb1ctrl = MCP2515_ReadByte(MCP2515_TXB1CTRL);
+  uint8_t txb2ctrl = MCP2515_ReadByte(MCP2515_TXB2CTRL);
+
 
   /* Finding empty buffer */
   if (ctrlStatus.TXB0REQ != 1)

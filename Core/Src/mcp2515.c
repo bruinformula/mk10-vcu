@@ -65,12 +65,18 @@ bool MCP2515_SetConfigMode(void)
   do {    
     /* confirm mode configuration */
 
+	MCP2515_WriteByte(MCP2515_CANCTRL, 0x80);
+
 	uint8_t canstat = MCP2515_ReadByte(MCP2515_CANSTAT);
-    if((MCP2515_ReadByte(MCP2515_CANSTAT) & 0xE0) == 0x80)
+	uint8_t SOMETHINGELSE = MCP2515_ReadByte(MCP2515_TXB0CTRL);
+
+    if((canstat & 0xE0) == 0x80)
       return true;
 
 //    MCP2515_WriteByte(MCP2515_CANCTRL, 0x80);
     loop--;
+    HAL_Delay(100);
+
   } while(loop > 0);
   } while(1);
   
