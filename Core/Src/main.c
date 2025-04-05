@@ -214,27 +214,28 @@ void checkCrossCheck(void)
 
 }
 
-//void sendTorqueCommand(void){
-//
-//	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
-//
-//	// Break the torqueValue into two bytes (little-endian)
-//	char msg0 = torqueValue & 0xFF;  // Low byte
-//	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
-//
-//	struct can_frame torqueCommand;
-//	torqueCommand.can_id = 0x0C0;
-//	torqueCommand.can_dlc = 8;
-//	torqueCommand.data[0] = msg0;
-//	torqueCommand.data[1] = msg1;
-//	torqueCommand.data[4] = 0;
-//	torqueCommand.data[5] = 0;
-//
-//
-//	MCP_sendMessage(&torqueCommand);
-//
-//
-//}
+void sendTorqueCommand(void){
+
+	int torqueValue = (int)(requestedTorque * 10);  // Convert to integer, multiply by 10
+
+	// Break the torqueValue into two bytes (little-endian)
+	char msg0 = torqueValue & 0xFF;  // Low byte
+	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
+
+	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	txMessage.frame.id = 0x0C0;
+	txMessage.frame.dlc = 8;
+	txMessage.frame.data0 = msg0;
+	txMessage.frame.data1 = msg1;
+	txMessage.frame.data2 = 0;
+	txMessage.frame.data3 = 0;
+	txMessage.frame.data4 = 0;
+	txMessage.frame.data5 = 0;
+	txMessage.frame.data6 = 0;
+	txMessage.frame.data7 = 0;
+	CANSPI_Transmit(&txMessage);
+
+}
 
 void checkReadyToDrive(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
@@ -295,40 +296,32 @@ int main(void)
   /* USER CODE END 2 */
 
   /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-	  txMessage.frame.id = 0x0A;
-	  txMessage.frame.dlc = 8;
-	  txMessage.frame.data0 = 0;
-	  txMessage.frame.data1 = 1;
-	  txMessage.frame.data2 = 2;
-	  txMessage.frame.data3 = 3;
-	  txMessage.frame.data4 = 4;
-	  txMessage.frame.data5 = 5;
-	  txMessage.frame.data6 = 6;
-	  txMessage.frame.data7 = 7;
-	  CANSPI_Transmit(&txMessage);
-//	  HAL_Delay(100);
-    /* USER CODE END WHILE */
+
 
     /* USER CODE BEGIN 3 */
 
   while (1)
   {
 	  /* USER CODE BEGIN WHILE */
-	  txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-	  txMessage.frame.id = 0x0A;
-	  txMessage.frame.dlc = 8;
-	  txMessage.frame.data0 = 0;
-	  txMessage.frame.data1 = 1;
-	  txMessage.frame.data2 = 2;
-	  txMessage.frame.data3 = 3;
-	  txMessage.frame.data4 = 4;
-	  txMessage.frame.data5 = 5;
-	  txMessage.frame.data6 = 6;
-	  txMessage.frame.data7 = 7;
-	  CANSPI_Transmit(&txMessage);
-//	  HAL_Delay(100);
+
+	 if(CANSPI_Receive(&rxMessage)){
+		 //do something
+	 }
+
+
+	 readAPPSandBSE();
+	 calculateTorqueRequest();
+	 checkAPPSPlausibility();
+	 checkCrossCheck();
+	 checkReadyToDrive();
+	 updateBMSDiagnostics();
+
+	 finalTorqueRequest = requestedTorque;
+	 lastRequestedTorque = requestedTorque;
+
+	 if(readyToDrive){
+		 sendTorqueCommand();
+	 }
     /* USER CODE END WHILE */
 
   }
