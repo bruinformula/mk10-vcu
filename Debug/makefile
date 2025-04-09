@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := omidjanani
+BUILD_ARTIFACT_NAME := i2s-audio-wav
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-omidjanani.elf \
+i2s-audio-wav.elf \
 
 MAP_FILES += \
-omidjanani.map \
+i2s-audio-wav.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-omidjanani.list \
+i2s-audio-wav.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: omidjanani.elf secondary-outputs
+main-build: i2s-audio-wav.elf secondary-outputs
 
 # Tool invocations
-omidjanani.elf omidjanani.map: $(OBJS) $(USER_OBJS) C:\Users\basim\iCloudDrive\Coding\stm32_programming\omidjanani\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "omidjanani.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\basim\iCloudDrive\Coding\stm32_programming\omidjanani\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="omidjanani.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+i2s-audio-wav.elf i2s-audio-wav.map: $(OBJS) $(USER_OBJS) D:\Projects\Code\ Projects\mk10-vcu\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "i2s-audio-wav.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\Projects\Code Projects\mk10-vcu\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="i2s-audio-wav.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-omidjanani.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "omidjanani.list"
+i2s-audio-wav.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "i2s-audio-wav.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) default.size.stdout omidjanani.elf omidjanani.list omidjanani.map
+	-$(RM) default.size.stdout i2s-audio-wav.elf i2s-audio-wav.list i2s-audio-wav.map
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)
