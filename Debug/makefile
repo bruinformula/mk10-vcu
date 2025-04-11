@@ -1,6 +1,6 @@
 ################################################################################
 # Automatically-generated file. Do not edit!
-# Toolchain: GNU Tools for STM32 (12.3.rel1)
+# Toolchain: GNU Tools for STM32 (13.3.rel1)
 ################################################################################
 
 -include ../makefile.init
@@ -60,8 +60,8 @@ all: main-build
 main-build: VCU.elf secondary-outputs
 
 # Tool invocations
-VCU.elf VCU.map: $(OBJS) $(USER_OBJS) /Users/nakuljoshi/STM32CubeIDE/workspace_1.16.0/VCU/STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "VCU.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/nakuljoshi/STM32CubeIDE/workspace_1.16.0/VCU/STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="VCU.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+VCU.elf VCU.map: $(OBJS) $(USER_OBJS) C:\Users\justin\Documents\bfr\mk10-vcu\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "VCU.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\justin\Documents\bfr\mk10-vcu\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="VCU.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
