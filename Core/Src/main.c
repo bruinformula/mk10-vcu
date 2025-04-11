@@ -23,27 +23,41 @@
 /* USER CODE BEGIN Includes */
 
 #include "CANSPI.h"
+#include <stdlib.h>     // for abs(), or in our case, use fabsf() from <math.h>
+#include <math.h>       // for fabsf()
 #include "constants.h"
 #include "mcp2515.h"
 #include <stdio.h>
+#define false 0
+#define true 1
 
+//--- BEGIN WAV PLAYBACK DEFINES ---//
 
+// Typical WAV header size
+#define WAV_HEADER_SIZE         44
+// Number of PCM bytes = total - header
+#define WAV_DATA_SIZE           (startup_sound_len - WAV_HEADER_SIZE)
+// total halfwords in the PCM data (16-bit)
+#define TOTAL_HALFWORDS         (WAV_DATA_SIZE / 2)
+
+// We chunk the wave in up to 30000 halfwords transmissions to avoid the 65535 limit:
+#define CHUNK_SIZE_HALFWORDS    30000
+
+// Include your WAV array header
+#include "startup_sound.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -76,13 +90,7 @@ static void MX_SPI3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/*  includes */
-#include <stdlib.h>
-#define false 0
-#define true 1
-
 /*                    VCU vars                      */
-
 uint16_t apps1Value;
 uint16_t apps2Value;
 uint16_t bseValue;
@@ -131,27 +139,40 @@ typedef struct {
 
 InverterDiagnostics inverter_diagnostics;  // Declare a variable of type BMSDiagnostics
 
+//--- WAV Playback Variables ---//
 
-//struct can_frame driveCriticalCANRead;
+// global wave position
+static uint32_t wavPos = 0;
+// pointer to PCM data in Flash (16-bit samples)
+static const uint16_t* wavePCM = NULL;
+// total halfwords
+static uint32_t halfwordCount = 0;
+// flag if wave is finished
+static uint8_t waveFinished = 0;
 
-/*                    VCU vars end                    */
-
-/*            VCU Method Declarations           */
+//----------------------------------------------------
+// VCU method declarations
+//----------------------------------------------------
+void updateBMSDiagnostics(void);
 void readAPPSandBSE(void);
 void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
 void checkCrossCheck(void);
-void sendTorqueCommand(void);
 void checkReadyToDrive(void);
 void updateBMSDiagnostics(void);
 void readFromCAN(void);
 void updateRpm(void);
+void sendTorqueCommand(void);
 
-/*            VCU Method Declarations  end         */
+//----------------------------------------------------
+// WAV chunk-based playback
+//----------------------------------------------------
+static void StartNextChunk(void);
+void PlayStartupSoundOnce(void);
 
 
-//TODO: I have no idea if this is what this function is supposed to do, it doesn't feel correct, but it's all I could do with the info provided
- void updateRpm(){
+
+void updateRpm(){
  	inverter_diagnostics.motorRpm = (float)(rxMessage.frame.data0 | (rxMessage.frame.data1 << 8));
  }
 
@@ -161,26 +182,21 @@ void updateRpm(void);
  	}
  }
 
-void updateBMSDiagnostics(void){
 
+void updateBMSDiagnostics(void){
+    // do nothing for now
 }
 
 void readAPPSandBSE(void)
 {
-
-	// ADC Read Code
-	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-	if(HAL_GetTick() - millis_since_dma_read >DMA_READ_TIMEOUT){
-		apps1Value = ADC_Reads[APPS1_RANK];
-		apps2Value = ADC_Reads[APPS2_RANK];
-		bseValue = ADC_Reads[BSE_RANK];
-
-		millis_since_dma_read = HAL_GetTick();
-	}
-
-//	HAL_ADC_Stop_DMA(&hadc1);
-
-
+    // Start ADC DMA read
+    HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+    if(HAL_GetTick() - millis_since_dma_read > DMA_READ_TIMEOUT){
+        apps1Value = ADC_Reads[APPS1_RANK];
+        apps2Value = ADC_Reads[APPS2_RANK];
+        bseValue   = ADC_Reads[BSE_RANK];
+        millis_since_dma_read = HAL_GetTick();
+    }
 }
 
 void calculateTorqueRequest(void)
@@ -226,38 +242,43 @@ void calculateTorqueRequest(void)
 
 void checkAPPSPlausibility(void)
 {
+    apps1_as_percent = ((float)apps1Value - APPS_1_ADC_MIN_VAL)
+                      /(APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL)*100.0f;
+    apps2_as_percent = ((float)apps2Value - APPS_2_ADC_MIN_VAL)
+                      /(APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL)*100.0f;
 
-  apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL) * 100;
-  apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL) * 100;
-
-  if(abs(apps1_as_percent-apps2_as_percent)> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE){
-	  millis_since_apps_implausible = HAL_GetTick();
-	  apps_plausible = false;
-	  requestedTorque = 0;
-  }else if(!apps_plausible && HAL_GetTick()-millis_since_apps_implausible<APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS){
-	  requestedTorque = 0;
-  }else{
-	  apps_plausible = true;
-  }
+    // use fabsf() for float
+    if(fabsf(apps1_as_percent - apps2_as_percent) > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE){
+        millis_since_apps_implausible = HAL_GetTick();
+        apps_plausible = 0; // false
+        requestedTorque = 0;
+    }
+    else if(!apps_plausible && (HAL_GetTick() - millis_since_apps_implausible < APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)){
+        requestedTorque = 0;
+    }
+    else {
+        apps_plausible = 1; // true
+    }
 }
 
 void checkCrossCheck(void)
 {
+    bse_as_percent = ((float)bseValue - BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL)*100.0f;
 
-	bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL) * 100;
-	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL) * 100;
-	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL) * 100;
-	float apps_as_percent = ((float)apps1_as_percent+apps2_as_percent)/2;
+    float apps1p = ((float)apps1Value - APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL)*100.0f;
+    float apps2p = ((float)apps2Value - APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL)*100.0f;
+    float apps_as_percent = (apps1p + apps2p)/2.0f;
 
-	if(apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT && bseValue > BRAKE_ACTIVATED_ADC_VAL){
-	  cross_check_plausible = false;
-	  requestedTorque = 0;
-	}else if(!cross_check_plausible && apps_as_percent > CROSS_CHECK_RESTORATION_APPS_PERCENT){
-		requestedTorque = 0;
-	}else{
-		cross_check_plausible = true;
-	}
-
+    if (apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT && bseValue > BRAKE_ACTIVATED_ADC_VAL){
+        cross_check_plausible = 0;
+        requestedTorque = 0;
+    }
+    else if(!cross_check_plausible && apps_as_percent > CROSS_CHECK_RESTORATION_APPS_PERCENT){
+        requestedTorque = 0;
+    }
+    else {
+        cross_check_plausible = 1;
+    }
 }
 
 void sendTorqueCommand(void){
@@ -280,14 +301,71 @@ void sendTorqueCommand(void){
 	txMessage.frame.data6 = 0;
 	txMessage.frame.data7 = 0;
 	CANSPI_Transmit(&txMessage);
-
 }
 
-void checkReadyToDrive(void){
-	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
-	    readyToDrive = true;
-	}
+void checkReadyToDrive(void)
+{
+    uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5); // example
+    if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
+        readyToDrive = 1;
+    }
+}
+
+
+//-----------------------------------------------
+// I2S chunk-based WAV Playback Methods
+//-----------------------------------------------
+/**
+  * @brief Called by HAL when a DMA transmission completes (for one chunk).
+  */
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+    if (hi2s->Instance == SPI2 && !waveFinished)
+    {
+        // finished one chunk
+        if (wavPos < halfwordCount)
+        {
+            StartNextChunk();
+        }
+        else
+        {
+            // entire wave is done
+            waveFinished = 1;
+        }
+    }
+}
+
+/**
+  * @brief Start the next chunk of PCM in Normal DMA mode
+  */
+static void StartNextChunk(void)
+{
+    // how many halfwords remain
+    uint32_t remain = halfwordCount - wavPos;
+    // pick chunk
+    uint16_t thisChunk = (remain > CHUNK_SIZE_HALFWORDS)
+                        ? CHUNK_SIZE_HALFWORDS
+                        : (uint16_t)remain;
+
+    const uint16_t* chunkPtr = wavePCM + wavPos;
+    wavPos += thisChunk;
+
+    // Fire the DMA
+    HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*)chunkPtr, thisChunk);
+}
+
+/**
+  * @brief Public function to play the wave from beginning exactly once
+  */
+void PlayStartupSoundOnce(void)
+{
+    wavePCM       = (const uint16_t*)&startup_sound[WAV_HEADER_SIZE];
+    halfwordCount = TOTAL_HALFWORDS;
+    wavPos        = 0;
+    waveFinished  = 0;
+
+    // Start the first chunk
+    StartNextChunk();
 }
 
 /* USER CODE END 0 */
@@ -327,7 +405,7 @@ int main(void)
   MX_TIM3_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
-
+  // Start TIM3
   HAL_TIM_Base_Start(&htim3);
 
   /* initalized to be 500kbps, see canspi.c line 131-133 for details */
@@ -339,13 +417,11 @@ int main(void)
 
   bms_diagnostics.inverterActive = 0;
   inverter_diagnostics.motorRpm = 0;
+  PlayStartupSoundOnce();
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
-
-
-    /* USER CODE BEGIN 3 */
 
   while (1)
   {
@@ -371,9 +447,15 @@ int main(void)
 	 }
     /* USER CODE END WHILE */
 
+    // The wave playback is handled by DMA + callback, so no blocking here
   }
-  /* USER CODE END 3 */
+  /* USER CODE END WHILE */
+
+  /* USER CODE BEGIN 3 */
+  // never reached
 }
+  /* USER CODE END 3 */
+
 
 /**
   * @brief System Clock Configuration
@@ -397,9 +479,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 84;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLM = 16;
+  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -515,7 +597,7 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -642,16 +724,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, LED1_Pin|CAN2_CS_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(MCP2515_RESET_GPIO_Port, MCP2515_RESET_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(CAN_CS_GPIO_Port, CAN_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
@@ -662,40 +735,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LED1_Pin */
-  GPIO_InitStruct.Pin = LED1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : CAN2_CS_Pin */
-  GPIO_InitStruct.Pin = CAN2_CS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : MCP2515_RESET_Pin */
-  GPIO_InitStruct.Pin = MCP2515_RESET_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(MCP2515_RESET_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LED2_Pin */
+  /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LED2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : CAN_CS_Pin */
-  GPIO_InitStruct.Pin = CAN_CS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(CAN_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB4 */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
