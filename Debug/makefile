@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := mk10-vcu-main
+BUILD_ARTIFACT_NAME := VCU
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-mk10-vcu-main.elf \
+VCU.elf \
 
 MAP_FILES += \
-mk10-vcu-main.map \
+VCU.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-mk10-vcu-main.list \
+VCU.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: mk10-vcu-main.elf secondary-outputs
+main-build: VCU.elf secondary-outputs
 
 # Tool invocations
-mk10-vcu-main.elf mk10-vcu-main.map: $(OBJS) $(USER_OBJS) C:\Users\antho\STM32CubeIDE\workspace_1.17.0\mk10-vcu-main\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "mk10-vcu-main.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\antho\STM32CubeIDE\workspace_1.17.0\mk10-vcu-main\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="mk10-vcu-main.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+VCU.elf VCU.map: $(OBJS) $(USER_OBJS) /Users/nakuljoshi/STM32CubeIDE/workspace_1.16.0/VCU/STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "VCU.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/nakuljoshi/STM32CubeIDE/workspace_1.16.0/VCU/STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="VCU.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-mk10-vcu-main.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "mk10-vcu-main.list"
+VCU.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "VCU.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) default.size.stdout mk10-vcu-main.elf mk10-vcu-main.list mk10-vcu-main.map
+	-$(RM) VCU.elf VCU.list VCU.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)

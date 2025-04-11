@@ -92,6 +92,8 @@ float requestedTorque;
 float lastRequestedTorque = 0;
 float finalTorqueRequest;
 
+
+
 //apps plausibility
 uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
@@ -120,8 +122,14 @@ typedef struct {
     // Add more fields as needed
 } BMSDiagnostics;  // The type alias is BMSDiagnostics
 
-BMSDiagnostics diagnostics;  // Declare a variable of type BMSDiagnostics
+BMSDiagnostics bms_diagnostics;  // Declare a variable of type BMSDiagnostics
 
+typedef struct {
+	int motorRpm;
+    // Add more fields as needed
+} InverterDiagnostics;  // The type alias is BMSDiagnostics
+
+InverterDiagnostics inverter_diagnostics;  // Declare a variable of type BMSDiagnostics
 
 
 //struct can_frame driveCriticalCANRead;
@@ -136,11 +144,22 @@ void checkCrossCheck(void);
 void sendTorqueCommand(void);
 void checkReadyToDrive(void);
 void updateBMSDiagnostics(void);
+void readFromCAN(void);
+void updateRpm(void);
 
 /*            VCU Method Declarations  end         */
 
 
+//TODO: I have no idea if this is what this function is supposed to do, it doesn't feel correct, but it's all I could do with the info provided
+ void updateRpm(){
+ 	inverter_diagnostics.motorRpm = (float)(rxMessage.frame.data0 | (rxMessage.frame.data1 << 8));
+ }
 
+ void readFromCAN(){
+ 	if(rxMessage.frame.id == RPM_READ_ID){
+ 		updateRpm();
+ 	}
+ }
 
 void updateBMSDiagnostics(void){
 
@@ -170,8 +189,35 @@ void calculateTorqueRequest(void)
 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
 	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
 	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
-	if(appsValue >= 0){
-		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
+	if(appsValue > 0){
+	 		int numPedalSteps = 10;
+	 		int numRpmSteps = 10;
+
+	 		float pedalStepSize = 100 / (numPedalSteps - 1);
+	 		float rpmStepSize = MAX_RPM / (numRpmSteps - 1);
+
+	 		int pedalLowIndx = (int)(appsValue/pedalStepSize);
+	 		int pedalHighIndx = pedalLowIndx + 1;
+	 		if (pedalHighIndx >= numPedalSteps) pedalHighIndx = numPedalSteps - 1;
+
+	 		int rpmLowIndx = (int)(inverter_diagnostics.motorRpm / rpmStepSize);
+	 		int rpmHighIndx = rpmLowIndx + 1;
+	 		if (rpmHighIndx >= numRpmSteps) rpmHighIndx = numRpmSteps - 1;
+
+	 	    float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];  // Lower-left
+	 	    float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx]; // Upper-left
+	 	    float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx]; // Lower-right
+	 	    float T11 = TORQUE_ARRAY[pedalHighIndx][rpmHighIndx]; // Upper-right
+
+	 	    // Compute interpolation weights
+	 	    float pedalLerp = (appsValue - (pedalLowIndx * pedalStepSize)) / pedalStepSize;
+	 	    float rpmLerp = (inverter_diagnostics.motorRpm - (rpmLowIndx * rpmStepSize)) / rpmStepSize;
+
+	 	    float torqueLow = T00 + (T01 - T00) * rpmLerp;
+	 	    float torqueHigh = T10 + (T11 - T10) * rpmLerp;
+
+	 		requestedTorque =  torqueLow + (torqueHigh - torqueLow) * pedalLerp;
+
 	}else{
 		float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
 		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
@@ -291,7 +337,8 @@ int main(void)
   }
 
 
-  diagnostics.inverterActive = 0;
+  bms_diagnostics.inverterActive = 0;
+  inverter_diagnostics.motorRpm = 0;
 
   /* USER CODE END 2 */
 
@@ -305,7 +352,7 @@ int main(void)
 	  /* USER CODE BEGIN WHILE */
 
 	 if(CANSPI_Receive(&rxMessage)){
-		 //do something
+		 readFromCAN();
 	 }
 
 

@@ -25,6 +25,8 @@ const float MAX_TORQUE = 108;
 const float REGEN_BASELINE_TORQUE = 0;
 const float REGEN_MAX_TORQUE = -30;
 
+const float MAX_RPM = 12000;
+
 const uint16_t BSE_ADC_MIN_VAL = 0;
 const uint16_t BSE_ADC_MAX_VAL = 4095;
 
@@ -38,5 +40,20 @@ const uint16_t CROSS_CHECK_RESTORATION_APPS_PERCENT = 5;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
 const uint16_t DMA_READ_TIMEOUT = 10;
+
+const float TORQUE_ARRAY[10][10] = {
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 100.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 8.0, 100.0},
+ 	{100.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 100.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 40.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ };
+
+const int RPM_READ_ID = 0x00; // TODO: move to a constants file and set to value of the motor id
 
 #endif /* INC_CONSTANTS_H_ */
