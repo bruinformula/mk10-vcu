@@ -8,14 +8,14 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 0;
+const uint16_t APPS1_RANK = 2;
 const uint16_t APPS2_RANK = 1;
 const uint16_t BSE_RANK = 2;
 
 const uint16_t APPS_1_ADC_MIN_VAL = 10;
 const uint16_t APPS_1_ADC_MAX_VAL = 4095;
 
-const uint16_t APPS_2_ADC_MIN_VAL = 10;
+const uint16_t APPS_2_ADC_MIN_VAL = 2058;
 const uint16_t APPS_2_ADC_MAX_VAL = 4095;
 
 //Nm
@@ -43,17 +43,19 @@ const uint16_t DMA_READ_TIMEOUT = 10;
 
 const float TORQUE_ARRAY[10][10] = {
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
- 	{4.0, 8.0, 12.0, 17.0, 21.0, 100.0, 29.0, 33.0, 45.0, 100.0},
- 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 8.0, 100.0},
- 	{100.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
- 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 100.0, 33.0, 45.0, 100.0},
- 	{4.0, 8.0, 12.0, 40.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
+ 	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  };
 
-const int RPM_READ_ID = 0x00; // TODO: move to a constants file and set to value of the motor id
+const int RPM_READ_ID = 0x0A5;
+const int INVERTER_VOLTAGE_READ_ID = 0x0A7;
+const int BMS_DIAGNOSTICS_ID = 0x6B0;// TODO: move to a constants file and set to value of the motor id
 
 #endif /* INC_CONSTANTS_H_ */

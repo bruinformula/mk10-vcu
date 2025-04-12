@@ -123,11 +123,9 @@ float bse_as_percent;
 uint8_t readyToDrive = false;
 
 typedef struct {
-	int stateOfCharge;
 	int inverterActive;
-	int batteryTemperature;
-	int faultCode;
-	int cellVoltage;
+	int packVoltage;
+	int packCurrent;
 // Add more fields as needed
 } BMSDiagnostics;  // The type alias is BMSDiagnostics
 
@@ -172,18 +170,38 @@ static void StartNextChunk(void);
 void PlayStartupSoundOnce(void);
 
 void updateRpm() {
-	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data0
-			| (rxMessage.frame.data1 << 8));
+	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2
+			| (rxMessage.frame.data3 << 8));
 }
 
 void readFromCAN() {
 	if (rxMessage.frame.id == RPM_READ_ID) {
 		updateRpm();
+	}else if(rxMessage.frame.id == BMS_DIAGNOSTICS_ID){
+		updateBMSDiagnostics();
 	}
 }
 
 void updateBMSDiagnostics(void) {
-	// do nothing for now
+	// Pack_Current (signed 16-bit at bit 8, factor 0.1)
+	int16_t pack_current_raw = (int16_t)((rxMessage.frame.data1 << 8) | rxMessage.frame.data0);  // Little-endian
+	float pack_current = pack_current_raw * 0.1f;
+
+	// Pack_Inst_Voltage (unsigned 16-bit at bit 24, factor 0.1)
+	uint16_t pack_voltage_raw = (rxMessage.frame.data3 << 8) | rxMessage.frame.data2;
+	float pack_voltage = pack_voltage_raw * 0.1f;
+
+	// Is_Ready_State (bit 54)
+	bool is_ready = (rxMessage.frame.data6 >> 6) & 0x01;
+
+	// Optional: cast to int if needed
+	int pack_current_int = (int)(pack_current);
+	int pack_voltage_int = (int)(pack_voltage);
+	int is_ready_int = is_ready ? 1 : 0;
+
+	bms_diagnostics.inverterActive = is_ready_int;
+	bms_diagnostics.packCurrent = pack_current_int;
+	bms_diagnostics.packVoltage = pack_voltage_int;
 }
 
 void readAPPSandBSE(void) {
@@ -311,8 +329,8 @@ void sendTorqueCommand(void) {
 }
 
 void checkReadyToDrive(void) {
-	uint8_t pinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5); // example
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
+	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin); // example
+	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive) {
 		readyToDrive = 1;
 	}
 }
@@ -413,7 +431,7 @@ int main(void) {
 
 	bms_diagnostics.inverterActive = 0;
 	inverter_diagnostics.motorRpm = 0;
-	PlayStartupSoundOnce();
+
 
 	/* USER CODE END 2 */
 
@@ -428,6 +446,9 @@ int main(void) {
 		calculateTorqueRequest();
 		checkAPPSPlausibility();
 		checkCrossCheck();
+
+		int readyToDriveActivated = readyToDrive;
+
 		checkReadyToDrive();
 		updateBMSDiagnostics();
 
@@ -435,6 +456,9 @@ int main(void) {
 		lastRequestedTorque = requestedTorque;
 
 		if (readyToDrive) {
+			if(!readyToDriveActivated){
+				PlayStartupSoundOnce();
+			}
 			sendTorqueCommand();
 		}
 		/* USER CODE END WHILE */
