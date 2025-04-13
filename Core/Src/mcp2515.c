@@ -96,7 +96,6 @@ bool MCP2515_SetNormalMode(void)
     if((MCP2515_ReadByte(MCP2515_CANSTAT) & 0xE0) == 0x00)
       return true;
     
-    MCP2515_WriteByte(MCP2515_CANCTRL, 0x00);
     loop--;
   } while(loop > 0);
   
@@ -116,10 +115,47 @@ bool MCP2515_SetSleepMode(void)
     if((MCP2515_ReadByte(MCP2515_CANSTAT) & 0xE0) == 0x20)
       return true;
     
-    MCP2515_WriteByte(MCP2515_CANCTRL, 0x20);
     loop--;
   } while(loop > 0);
   
+  return false;
+}
+
+/* Entering sleep mode */
+bool MCP2515_SetLoopbackMode(void)
+{
+  /* configure CANCTRL Register */
+  MCP2515_WriteByte(MCP2515_CANCTRL, 0x40);
+
+  uint8_t loop = 10;
+
+  do {
+    /* confirm mode configuration */
+    if((MCP2515_ReadByte(MCP2515_CANSTAT) & 0xE0) == 0x40)
+      return true;
+
+    loop--;
+  } while(loop > 0);
+
+  return false;
+}
+
+/* Entering sleep mode */
+bool MCP2515_SetListenOnlyMode(void)
+{
+  /* configure CANCTRL Register */
+  MCP2515_WriteByte(MCP2515_CANCTRL, 0x60);
+
+  uint8_t loop = 10;
+
+  do {
+    /* confirm mode configuration */
+    if((MCP2515_ReadByte(MCP2515_CANSTAT) & 0xE0) == 0x60)
+      return true;
+
+    loop--;
+  } while(loop > 0);
+
   return false;
 }
 

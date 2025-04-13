@@ -61,10 +61,12 @@ void Error_Handler(void);
 #define B1_GPIO_Port GPIOC
 #define LED1_Pin GPIO_PIN_0
 #define LED1_GPIO_Port GPIOC
-#define CAN2_CS_Pin GPIO_PIN_1
-#define CAN2_CS_GPIO_Port GPIOC
-#define MCP2515_RESET_Pin GPIO_PIN_2
-#define MCP2515_RESET_GPIO_Port GPIOC
+#define CAN_CS_Pin GPIO_PIN_1
+#define CAN_CS_GPIO_Port GPIOC
+#define CAN1_RESET_Pin GPIO_PIN_2
+#define CAN1_RESET_GPIO_Port GPIOC
+#define CAN2_RESET_Pin GPIO_PIN_3
+#define CAN2_RESET_GPIO_Port GPIOC
 #define USART_TX_Pin GPIO_PIN_2
 #define USART_TX_GPIO_Port GPIOA
 #define USART_RX_Pin GPIO_PIN_3
@@ -75,8 +77,8 @@ void Error_Handler(void);
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
-#define CAN_CS_Pin GPIO_PIN_15
-#define CAN_CS_GPIO_Port GPIOA
+#define CAN1_CS_Pin GPIO_PIN_15
+#define CAN1_CS_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 

@@ -47,6 +47,30 @@ void CANSPI_Sleep(void)
   MCP2515_SetSleepMode();
 }
 
+/* Entering Loopback Mode */
+void CANSPI_SetLoopbackMode(void)
+{
+  /* Clear CAN bus wakeup interrupt */
+  MCP2515_BitModify(MCP2515_CANINTF, 0x40, 0x00);
+
+  /* Enable CAN bus activity wakeup */
+  MCP2515_BitModify(MCP2515_CANINTE, 0x40, 0x40);
+
+  MCP2515_SetLoopbackMode();
+}
+
+/* Entering Listen-Only Mode */
+void CANSPI_SetListenOnlyMode(void)
+{
+  /* Clear CAN bus wakeup interrupt */
+  MCP2515_BitModify(MCP2515_CANINTF, 0x40, 0x00);
+
+  /* Enable CAN bus activity wakeup */
+  MCP2515_BitModify(MCP2515_CANINTE, 0x40, 0x40);
+
+  MCP2515_SetListenOnlyMode();
+}
+
 /* Initialize CAN */
 bool CANSPI_Initialize(void)
 {
@@ -129,6 +153,8 @@ bool CANSPI_Initialize(void)
   MCP2515_WriteByteSequence(MCP2515_RXF4SIDH, MCP2515_RXF4EID0, &(RXF4reg.RXF4SIDH));
   MCP2515_WriteByteSequence(MCP2515_RXF5SIDH, MCP2515_RXF5EID0, &(RXF5reg.RXF5SIDH));
   
+  uint8_t rxf4sidh = MCP2515_ReadByte(MCP2515_RXF4SIDH);
+
   /* Accept All (Standard + Extended) */
   MCP2515_WriteByte(MCP2515_RXB0CTRL, 0x04);    //Enable BUKT, Accept Filter 0
   MCP2515_WriteByte(MCP2515_RXB1CTRL, 0x01);    //Accept Filter 1
@@ -144,7 +170,7 @@ bool CANSPI_Initialize(void)
   MCP2515_WriteByte(MCP2515_CNF1, 0x00);
   
   /* 1 1 100(5tq) 101(6tq) */   //used to be 0xE5
-  MCP2515_WriteByte(MCP2515_CNF2, 0xF0);
+  MCP2515_WriteByte(MCP2515_CNF2, 0xE5);
   
   /* 1 0 000 011(4tq) */  
   MCP2515_WriteByte(MCP2515_CNF3, 0x83);
@@ -167,9 +193,9 @@ uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
   idReg.tempEID0 = 0;
   
   ctrlStatus.ctrl_status = MCP2515_ReadStatus();
-  uint8_t dingus = ctrlStatus.ctrl_status; //for use w stm32 debugger lol
-  uint8_t dingus2 = MCP2515_ReadByte(MCP2515_CANCTRL);
-  uint8_t efl = MCP2515_ReadByte(MCP2515_EFLG);
+  uint8_t ctrlstatus = ctrlStatus.ctrl_status; //for use w stm32 debugger lol
+  uint8_t canctrl = MCP2515_ReadByte(MCP2515_CANCTRL);
+  uint8_t eflag = MCP2515_ReadByte(MCP2515_EFLG);
   uint8_t txb0ctrl = MCP2515_ReadByte(MCP2515_TXB0CTRL);
   uint8_t txb1ctrl = MCP2515_ReadByte(MCP2515_TXB1CTRL);
   uint8_t txb2ctrl = MCP2515_ReadByte(MCP2515_TXB2CTRL);
