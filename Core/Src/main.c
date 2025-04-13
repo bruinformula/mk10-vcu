@@ -121,6 +121,10 @@ float apps2_as_percent;
 float bse_as_percent;
 
 uint8_t readyToDrive = false;
+uint8_t prechargeState = false;
+
+uint32_t millis_precharge;
+
 
 typedef struct {
 	int inverterActive;
@@ -162,12 +166,23 @@ void updateBMSDiagnostics(void);
 void readFromCAN(void);
 void updateRpm(void);
 void sendTorqueCommand(void);
+void sendPrechargeRequest(void);
+void checkShutdown(void);
 
 //----------------------------------------------------
 // WAV chunk-based playback
 //----------------------------------------------------
 static void StartNextChunk(void);
 void PlayStartupSoundOnce(void);
+
+void checkShutdown(){
+	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+	if (pinState == GPIO_PIN_SET) {
+		requestedTorque = 0;
+		sendTorqueCommand();
+		while(true){}
+	}
+}
 
 void updateRpm() {
 	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2
@@ -329,9 +344,32 @@ void sendTorqueCommand(void) {
 }
 
 void checkReadyToDrive(void) {
-	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin); // example
+	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin);
 	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive) {
 		readyToDrive = 1;
+	}
+}
+
+void sendPrechargeRequest(void){
+	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_GPIO_Port, PRECHARGE_Pin);
+	if(pinState == GPIO_PIN_SET && !prechargeState){
+		prechargeState = true;
+		millis_precharge = HAL_GetTick();
+	}else if (pinState == GPIO_PIN_RESET){
+		prechargeState = false;
+	}else if(HAL_GetTick()-millis_precharge >= 1000){
+		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+		txMessage.frame.id = PRECHARGE_REQUEST_ID;
+		txMessage.frame.dlc = 8;
+		txMessage.frame.data0 = 2;
+		txMessage.frame.data1 = 0;
+		txMessage.frame.data2 = 0;
+		txMessage.frame.data3 = 0;
+		txMessage.frame.data4 = 0;
+		txMessage.frame.data5 = 0;
+		txMessage.frame.data6 = 0;
+		txMessage.frame.data7 = 0;
+		CANSPI_Transmit(&txMessage);
 	}
 }
 

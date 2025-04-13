@@ -81,6 +81,10 @@ void Error_Handler(void);
 #define SWO_GPIO_Port GPIOB
 #define RTD_Pin GPIO_PIN_5
 #define RTD_GPIO_Port GPIOA
+#define PRECHARGE_Pin GPIO_PIN_8
+#define PRECHARGE_GPIO_Port GPIOA
+#define SHUTDOWN_Pin GPIO_PIN_8
+#define SHUTDOWN_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
