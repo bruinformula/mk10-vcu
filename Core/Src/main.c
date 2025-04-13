@@ -477,64 +477,64 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
-		if (CANSPI_Receive(&rxMessage)) {
+//		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
-		}
-//		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-//		txMessage.frame.id = 0b10000000011;
-//		txMessage.frame.dlc = 8;
-//		txMessage.frame.data0 = 0x61;
-//		txMessage.frame.data1 = 0x73;
-//		txMessage.frame.data2 = 0x73;
-//		txMessage.frame.data3 = 0x68;
-//		txMessage.frame.data4 = 0x6F;
-//		txMessage.frame.data5 = 0x6C;
-//		txMessage.frame.data6 = 0x65;
-//		txMessage.frame.data7 = 0x73;
-//		CANSPI_Transmit(&txMessage);
-//
-//		HAL_Delay(100);
-//
-//		if(CANSPI_Receive(&rxMessage))
-//		{
-//			uCAN_MSG orangeMessage = rxMessage;
-//			uCAN_MSG ppMesage;
-//			ppMesage.frame.idType = rxMessage.frame.idType;
-//			ppMesage.frame.id = rxMessage.frame.id;
-//			ppMesage.frame.dlc = rxMessage.frame.dlc;
-//			ppMesage.frame.data0 = rxMessage.frame.data0 | 0xAA;
-//			ppMesage.frame.data1 = rxMessage.frame.data1 | 0xAA;
-//			ppMesage.frame.data2 = rxMessage.frame.data2 | 0xAA;
-//			ppMesage.frame.data3 = rxMessage.frame.data3 | 0xAA;
-//			ppMesage.frame.data4 = rxMessage.frame.data4 | 0xAA;
-//			ppMesage.frame.data5 = rxMessage.frame.data5 | 0xAA;
-//			ppMesage.frame.data6 = rxMessage.frame.data6 | 0xAA;
-//			ppMesage.frame.data7 = rxMessage.frame.data7 | 0xAA;
-//			uCAN_MSG ppMessage2 = ppMesage;
-//
-//			CANSPI_Transmit(&ppMesage);
-//
 //		}
+		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+		txMessage.frame.id = 0b10000000011;
+		txMessage.frame.dlc = 8;
+		txMessage.frame.data0 = 0x61;
+		txMessage.frame.data1 = 0x73;
+		txMessage.frame.data2 = 0x73;
+		txMessage.frame.data3 = 0x68;
+		txMessage.frame.data4 = 0x6F;
+		txMessage.frame.data5 = 0x6C;
+		txMessage.frame.data6 = 0x65;
+		txMessage.frame.data7 = 0x73;
+		CANSPI_Transmit(&txMessage);
 
-		readAPPSandBSE();
-		calculateTorqueRequest();
-		checkAPPSPlausibility();
-		checkCrossCheck();
+		HAL_Delay(100);
 
-		int readyToDriveActivated = readyToDrive;
+		if(CANSPI_Receive(&rxMessage))
+		{
+			uCAN_MSG orangeMessage = rxMessage;
+			uCAN_MSG ppMesage;
+			ppMesage.frame.idType = rxMessage.frame.idType;
+			ppMesage.frame.id = rxMessage.frame.id;
+			ppMesage.frame.dlc = rxMessage.frame.dlc;
+			ppMesage.frame.data0 = rxMessage.frame.data0 | 0xAA;
+			ppMesage.frame.data1 = rxMessage.frame.data1 | 0xAA;
+			ppMesage.frame.data2 = rxMessage.frame.data2 | 0xAA;
+			ppMesage.frame.data3 = rxMessage.frame.data3 | 0xAA;
+			ppMesage.frame.data4 = rxMessage.frame.data4 | 0xAA;
+			ppMesage.frame.data5 = rxMessage.frame.data5 | 0xAA;
+			ppMesage.frame.data6 = rxMessage.frame.data6 | 0xAA;
+			ppMesage.frame.data7 = rxMessage.frame.data7 | 0xAA;
+			uCAN_MSG ppMessage2 = ppMesage;
 
-		checkReadyToDrive();
-		updateBMSDiagnostics();
+			CANSPI_Transmit(&ppMesage);
 
-		finalTorqueRequest = requestedTorque;
-		lastRequestedTorque = requestedTorque;
-
-		if (readyToDrive) {
-			if(!readyToDriveActivated){
-				PlayStartupSoundOnce();
-			}
-			sendTorqueCommand();
 		}
+
+//		readAPPSandBSE();
+//		calculateTorqueRequest();
+//		checkAPPSPlausibility();
+//		checkCrossCheck();
+//
+//		int readyToDriveActivated = readyToDrive;
+//
+//		checkReadyToDrive();
+//		updateBMSDiagnostics();
+//
+//		finalTorqueRequest = requestedTorque;
+//		lastRequestedTorque = requestedTorque;
+//
+//		if (readyToDrive) {
+//			if(!readyToDriveActivated){
+//				PlayStartupSoundOnce();
+//			}
+//			sendTorqueCommand();
+//		}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
