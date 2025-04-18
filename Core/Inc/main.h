@@ -67,14 +67,10 @@ void Error_Handler(void);
 #define CAN1_RESET_GPIO_Port GPIOC
 #define CAN2_RESET_Pin GPIO_PIN_3
 #define CAN2_RESET_GPIO_Port GPIOC
-#define USART_TX_Pin GPIO_PIN_2
-#define USART_TX_GPIO_Port GPIOA
-#define USART_RX_Pin GPIO_PIN_3
-#define USART_RX_GPIO_Port GPIOA
 #define LED2_Pin GPIO_PIN_5
 #define LED2_GPIO_Port GPIOA
-#define RTD_Pin GPIO_PIN_2
-#define RTD_GPIO_Port GPIOB
+#define RTD_Pin GPIO_PIN_7
+#define RTD_GPIO_Port GPIOA
 #define PRECHARGE_Pin GPIO_PIN_7
 #define PRECHARGE_GPIO_Port GPIOC
 #define SHUTDOWN_Pin GPIO_PIN_9

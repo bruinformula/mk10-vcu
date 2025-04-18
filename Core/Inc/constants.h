@@ -8,14 +8,14 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 2;
+const uint16_t APPS1_RANK = 0;
 const uint16_t APPS2_RANK = 1;
 const uint16_t BSE_RANK = 2;
 
 const uint16_t APPS_1_ADC_MIN_VAL = 10;
-const uint16_t APPS_1_ADC_MAX_VAL = 4095;
+const uint16_t APPS_1_ADC_MAX_VAL = 3100;
 
-const uint16_t APPS_2_ADC_MIN_VAL = 2058;
+const uint16_t APPS_2_ADC_MIN_VAL = 10;
 const uint16_t APPS_2_ADC_MAX_VAL = 4095;
 
 //Nm

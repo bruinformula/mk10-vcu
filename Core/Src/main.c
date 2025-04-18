@@ -49,6 +49,17 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef struct {
+	int inverterActive;
+	int packVoltage;
+	int packCurrent;
+// Add more fields as needed
+} BMSDiagnostics;  // The type alias is BMSDiagnostics
+
+typedef struct {
+	int motorRpm;
+// Add more fields as needed
+} InverterDiagnostics;  // The type alias is InverterDiagnostics
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -70,31 +81,12 @@ DMA_HandleTypeDef hdma_spi2_tx;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim3;
-
-UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_tim3_ch4_up;
 
 /* USER CODE BEGIN PV */
 uCAN_MSG txMessage;
 uCAN_MSG rxMessage;
-/* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
-static void MX_USART2_UART_Init(void);
-static void MX_ADC1_Init(void);
-static void MX_TIM3_Init(void);
-static void MX_SPI3_Init(void);
-static void MX_I2S2_Init(void);
-/* USER CODE BEGIN PFP */
-
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/*                    VCU vars                      */
 uint16_t apps1Value;
 uint16_t apps2Value;
 uint16_t bseValue;
@@ -103,78 +95,71 @@ float requestedTorque;
 float lastRequestedTorque = 0;
 float finalTorqueRequest;
 
-//apps plausibility
+// APPS plausibility
 uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
-
 uint32_t millis_since_dma_read;
 
-//cross check plausibility
+// Cross-check plausibility
 uint16_t cross_check_plausible = true;
 
+// ADC buffer
 uint32_t ADC_Reads[3];
 uint32_t ADC_BUFFER = 3;
 
-//temp
+// Temp variables for display or logic
 float apps1_as_percent;
 float apps2_as_percent;
 float bse_as_percent;
 
+// BSE / brake pressed logic
 uint8_t readyToDrive = false;
 uint8_t prechargeState = false;
-
 uint32_t millis_precharge;
 
-
-typedef struct {
-	int inverterActive;
-	int packVoltage;
-	int packCurrent;
-// Add more fields as needed
-} BMSDiagnostics;  // The type alias is BMSDiagnostics
-
-BMSDiagnostics bms_diagnostics;  // Declare a variable of type BMSDiagnostics
-
-typedef struct {
-	int motorRpm;
-// Add more fields as needed
-} InverterDiagnostics;  // The type alias is BMSDiagnostics
-
-InverterDiagnostics inverter_diagnostics; // Declare a variable of type BMSDiagnostics
+// Diagnostics structures
+BMSDiagnostics bms_diagnostics;
+InverterDiagnostics inverter_diagnostics;
 
 //--- WAV Playback Variables ---//
+static uint32_t wavPos = 0;                // global wave position index
+static const uint16_t *wavePCM = NULL;     // pointer to PCM data in Flash
+static uint32_t halfwordCount = 0;         // total halfwords
+static uint8_t waveFinished = 0;           // flag if wave is finished
 
-// global wave position
-static uint32_t wavPos = 0;
-// pointer to PCM data in Flash (16-bit samples)
-static const uint16_t *wavePCM = NULL;
-// total halfwords
-static uint32_t halfwordCount = 0;
-// flag if wave is finished
-static uint8_t waveFinished = 0;
+/* USER CODE END PV */
 
-//----------------------------------------------------
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
+static void MX_ADC1_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_SPI3_Init(void);
+static void MX_I2S2_Init(void);
+/* USER CODE BEGIN PFP */
+
 // VCU method declarations
-//----------------------------------------------------
 void updateBMSDiagnostics(void);
-void readAPPSandBSE(void);
+void readFromCAN(void);
+void updateRpm(void);
 void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
 void checkCrossCheck(void);
 void checkReadyToDrive(void);
-void updateBMSDiagnostics(void);
-void readFromCAN(void);
-void updateRpm(void);
 void sendTorqueCommand(void);
 void sendPrechargeRequest(void);
 void checkShutdown(void);
-
-//----------------------------------------------------
-// WAV chunk-based playback
-//----------------------------------------------------
-static void StartNextChunk(void);
 void PlayStartupSoundOnce(void);
 
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/**
+ * @brief Repeatedly check the shutdown pin; if high, set torque to 0 and block forever.
+ */
 void checkShutdown(){
 	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 	if (pinState == GPIO_PIN_SET) {
@@ -184,19 +169,29 @@ void checkShutdown(){
 	}
 }
 
+/**
+ * @brief Update Inverter RPM reading from the last received CAN message.
+ */
 void updateRpm() {
 	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2
 			| (rxMessage.frame.data3 << 8));
 }
 
+/**
+ * @brief Read relevant data from incoming CAN messages
+ */
 void readFromCAN() {
 	if (rxMessage.frame.id == RPM_READ_ID) {
 		updateRpm();
-	}else if(rxMessage.frame.id == BMS_DIAGNOSTICS_ID){
+	}
+	else if(rxMessage.frame.id == BMS_DIAGNOSTICS_ID){
 		updateBMSDiagnostics();
 	}
 }
 
+/**
+ * @brief Parse BMS diagnostics from a received CAN message
+ */
 void updateBMSDiagnostics(void) {
 	// Pack_Current (signed 16-bit at bit 8, factor 0.1)
 	int16_t pack_current_raw = (int16_t)((rxMessage.frame.data1 << 8) | rxMessage.frame.data0);  // Little-endian
@@ -209,68 +204,69 @@ void updateBMSDiagnostics(void) {
 	// Is_Ready_State (bit 54)
 	bool is_ready = (rxMessage.frame.data6 >> 6) & 0x01;
 
-	// Optional: cast to int if needed
-	int pack_current_int = (int)(pack_current);
-	int pack_voltage_int = (int)(pack_voltage);
-	int is_ready_int = is_ready ? 1 : 0;
-
-	bms_diagnostics.inverterActive = is_ready_int;
-	bms_diagnostics.packCurrent = pack_current_int;
-	bms_diagnostics.packVoltage = pack_voltage_int;
+	bms_diagnostics.inverterActive = is_ready ? 1 : 0;
+	bms_diagnostics.packCurrent    = (int)pack_current;
+	bms_diagnostics.packVoltage    = (int)pack_voltage;
 }
 
-void readAPPSandBSE(void) {
-	// Start ADC DMA read
-	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-	if (HAL_GetTick() - millis_since_dma_read > DMA_READ_TIMEOUT) {
-		apps1Value = ADC_Reads[APPS1_RANK];
-		apps2Value = ADC_Reads[APPS2_RANK];
-		bseValue = ADC_Reads[BSE_RANK];
-		millis_since_dma_read = HAL_GetTick();
-	}
+/**
+ * @brief ADC Conversion Complete callback. Copies the DMA buffer into apps/bse values.
+ */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
+	// Because DMAContinuousRequests is enabled and triggered by TIM3,
+	// this will be called repeatedly on each conversion sequence.
+	apps1Value = ADC_Reads[APPS1_RANK];
+	apps2Value = ADC_Reads[APPS2_RANK];
+	bseValue   = ADC_Reads[BSE_RANK];
+
+	millis_since_dma_read = HAL_GetTick();
 }
 
+/**
+ * @brief Calculate the requested torque based on APPS and RPM, or regen based on BSE.
+ */
 void calculateTorqueRequest(void) {
-
 	float apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
 			/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL);
 	float apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
 			/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL);
-	float appsValue = ((float) apps1_as_percent + apps2_as_percent) / 2;
+	float appsValue = (apps1_as_percent + apps2_as_percent) / 2.0f;
+
 	if (appsValue > 0) {
+		// Pedal-based torque map
 		int numPedalSteps = 10;
-		int numRpmSteps = 10;
+		int numRpmSteps   = 10;
 
-		float pedalStepSize = 100 / (numPedalSteps - 1);
-		float rpmStepSize = MAX_RPM / (numRpmSteps - 1);
+		float pedalStepSize = 100.0f / (numPedalSteps - 1);
+		float rpmStepSize   = MAX_RPM / (numRpmSteps - 1);
 
-		int pedalLowIndx = (int) (appsValue / pedalStepSize);
+		int pedalLowIndx = (int)(appsValue / (pedalStepSize / 100.0f));  // handle properly if needed
 		int pedalHighIndx = pedalLowIndx + 1;
-		if (pedalHighIndx >= numPedalSteps)
+		if (pedalHighIndx >= numPedalSteps) {
 			pedalHighIndx = numPedalSteps - 1;
+		}
 
-		int rpmLowIndx = (int) (inverter_diagnostics.motorRpm / rpmStepSize);
+		int rpmLowIndx = (int)(inverter_diagnostics.motorRpm / rpmStepSize);
 		int rpmHighIndx = rpmLowIndx + 1;
-		if (rpmHighIndx >= numRpmSteps)
+		if (rpmHighIndx >= numRpmSteps) {
 			rpmHighIndx = numRpmSteps - 1;
+		}
 
-		float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];  // Lower-left
-		float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx]; // Upper-left
-		float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx]; // Lower-right
+		float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];   // Lower-left
+		float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx];  // Upper-left
+		float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx];  // Lower-right
 		float T11 = TORQUE_ARRAY[pedalHighIndx][rpmHighIndx]; // Upper-right
 
-		// Compute interpolation weights
-		float pedalLerp = (appsValue - (pedalLowIndx * pedalStepSize))
-				/ pedalStepSize;
-		float rpmLerp = (inverter_diagnostics.motorRpm
-				- (rpmLowIndx * rpmStepSize)) / rpmStepSize;
+		float pedalLerp = (appsValue * 100.0f - (pedalLowIndx * pedalStepSize)) / pedalStepSize;
+		float rpmLerp   = (float)(inverter_diagnostics.motorRpm - (rpmLowIndx * rpmStepSize)) / rpmStepSize;
 
-		float torqueLow = T00 + (T01 - T00) * rpmLerp;
+		float torqueLow  = T00 + (T01 - T00) * rpmLerp;
 		float torqueHigh = T10 + (T11 - T10) * rpmLerp;
 
 		requestedTorque = torqueLow + (torqueHigh - torqueLow) * pedalLerp;
-
-	} else {
+	}
+	else {
+		// Regen based on brake pedal
 		float bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
 				/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL);
 		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)
@@ -278,27 +274,32 @@ void calculateTorqueRequest(void) {
 	}
 }
 
+/**
+ * @brief Check plausibility of APPS sensors.
+ */
 void checkAPPSPlausibility(void) {
 	apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
 			/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
 	apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
 			/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
 
-	// use fabsf() for float
-	if (fabsf(apps1_as_percent - apps2_as_percent)
-			> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+	if (fabsf(apps1_as_percent - apps2_as_percent) > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		millis_since_apps_implausible = HAL_GetTick();
 		apps_plausible = 0; // false
 		requestedTorque = 0;
-	} else if (!apps_plausible
-			&& (HAL_GetTick() - millis_since_apps_implausible
-					< APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+	}
+	else if (!apps_plausible
+			&& (HAL_GetTick() - millis_since_apps_implausible < APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
 		requestedTorque = 0;
-	} else {
+	}
+	else {
 		apps_plausible = 1; // true
 	}
 }
 
+/**
+ * @brief Check cross-check between APPS and brake pedal.
+ */
 void checkCrossCheck(void) {
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
 			/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
@@ -313,25 +314,30 @@ void checkCrossCheck(void) {
 			&& bseValue > BRAKE_ACTIVATED_ADC_VAL) {
 		cross_check_plausible = 0;
 		requestedTorque = 0;
-	} else if (!cross_check_plausible
+	}
+	else if (!cross_check_plausible
 			&& apps_as_percent > CROSS_CHECK_RESTORATION_APPS_PERCENT) {
 		requestedTorque = 0;
-	} else {
+	}
+	else {
 		cross_check_plausible = 1;
 	}
 }
 
+/**
+ * @brief Send the torque command message over CAN.
+ */
 void sendTorqueCommand(void) {
-
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
-	char msg0 = torqueValue & 0xFF;  // Low byte
-	char msg1 = (torqueValue >> 8) & 0xFF;  // High byte
+	char msg0 = torqueValue & 0xFF;
+	char msg1 = (torqueValue >> 8) & 0xFF;
 
 	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	txMessage.frame.id = 0x0C0;
 	txMessage.frame.dlc = 8;
+
 	txMessage.frame.data0 = msg0;
 	txMessage.frame.data1 = msg1;
 	txMessage.frame.data2 = 0;
@@ -340,28 +346,37 @@ void sendTorqueCommand(void) {
 	txMessage.frame.data5 = 0;
 	txMessage.frame.data6 = 0;
 	txMessage.frame.data7 = 0;
+
 	CANSPI_Transmit(&txMessage);
 }
 
+/**
+ * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
+ */
 void checkReadyToDrive(void) {
 	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin);
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive) {
+	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
 		readyToDrive = 1;
 	}
 }
 
+/**
+ * @brief If a hardware pin requests precharge, send a request via CAN after a short debounce.
+ */
 void sendPrechargeRequest(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_GPIO_Port, PRECHARGE_Pin);
 	if(pinState == GPIO_PIN_SET && !prechargeState){
 		prechargeState = true;
 		millis_precharge = HAL_GetTick();
-	}else if (pinState == GPIO_PIN_RESET){
+	}
+	else if (pinState == GPIO_PIN_RESET){
 		prechargeState = false;
-	}else if(HAL_GetTick()-millis_precharge >= 1000){
+	}
+	else if(HAL_GetTick()-millis_precharge >= 1000){
 		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 		txMessage.frame.id = PRECHARGE_REQUEST_ID;
 		txMessage.frame.dlc = 8;
-		txMessage.frame.data0 = 2;
+		txMessage.frame.data0 = 2; // your precharge request code
 		txMessage.frame.data1 = 0;
 		txMessage.frame.data2 = 0;
 		txMessage.frame.data3 = 0;
@@ -383,8 +398,15 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
 	if (hi2s->Instance == SPI2 && !waveFinished) {
 		// finished one chunk
 		if (wavPos < halfwordCount) {
-			StartNextChunk();
-		} else {
+			// Start the next chunk
+			uint32_t remain = halfwordCount - wavPos;
+			uint16_t thisChunk = (remain > CHUNK_SIZE_HALFWORDS) ? CHUNK_SIZE_HALFWORDS : (uint16_t) remain;
+			const uint16_t *chunkPtr = wavePCM + wavPos;
+			wavPos += thisChunk;
+
+			HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*) chunkPtr, thisChunk);
+		}
+		else {
 			// entire wave is done
 			waveFinished = 1;
 		}
@@ -392,25 +414,7 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
 }
 
 /**
- * @brief Start the next chunk of PCM in Normal DMA mode
- */
-static void StartNextChunk(void) {
-	// how many halfwords remain
-	uint32_t remain = halfwordCount - wavPos;
-	// pick chunk
-	uint16_t thisChunk =
-			(remain > CHUNK_SIZE_HALFWORDS) ?
-					CHUNK_SIZE_HALFWORDS : (uint16_t) remain;
-
-	const uint16_t *chunkPtr = wavePCM + wavPos;
-	wavPos += thisChunk;
-
-	// Fire the DMA
-	HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*) chunkPtr, thisChunk);
-}
-
-/**
- * @brief Public function to play the wave from beginning exactly once
+ * @brief Play the startup sound from Flash exactly once.
  */
 void PlayStartupSoundOnce(void) {
 	wavePCM = (const uint16_t*) &startup_sound[WAV_HEADER_SIZE];
@@ -418,8 +422,13 @@ void PlayStartupSoundOnce(void) {
 	wavPos = 0;
 	waveFinished = 0;
 
-	// Start the first chunk
-	StartNextChunk();
+	// First chunk
+	uint32_t remain = halfwordCount - wavPos;
+	uint16_t thisChunk = (remain > CHUNK_SIZE_HALFWORDS) ? CHUNK_SIZE_HALFWORDS : (uint16_t) remain;
+	const uint16_t *chunkPtr = wavePCM + wavPos;
+	wavPos += thisChunk;
+
+	HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*) chunkPtr, thisChunk);
 }
 
 /* USER CODE END 0 */
@@ -432,7 +441,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -454,92 +462,68 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_USART2_UART_Init();
   MX_ADC1_Init();
   MX_TIM3_Init();
   MX_SPI3_Init();
   MX_I2S2_Init();
   /* USER CODE BEGIN 2 */
-	// Start TIM3
-	HAL_TIM_Base_Start(&htim3);
+  // Start TIM3
+  HAL_TIM_Base_Start(&htim3);
 
-	/* initalized to be 500kbps, see canspi.c line 131-133 for details */
-	if (CANSPI_Initialize() != true) {
-		Error_Handler();
-	}
+  // Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
+  if (CANSPI_Initialize() != true) {
+  	Error_Handler();
+  }
 
-	bms_diagnostics.inverterActive = 0;
-	inverter_diagnostics.motorRpm = 0;
+  // Initialize some diagnostics values
+  bms_diagnostics.inverterActive = 0;
+  inverter_diagnostics.motorRpm   = 0;
 
+  // Start ADC in DMA mode
+  // This will trigger on each rising edge of TIM3 TRGO, in combination
+  // with hadc1.Init.DMAContinuousRequests = ENABLE.
+  HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	while (1) {
-//		if (CANSPI_Receive(&rxMessage)) {
-			readFromCAN();
-//		}
-		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-		txMessage.frame.id = 0b10000000011;
-		txMessage.frame.dlc = 8;
-		txMessage.frame.data0 = 0x61;
-		txMessage.frame.data1 = 0x73;
-		txMessage.frame.data2 = 0x73;
-		txMessage.frame.data3 = 0x68;
-		txMessage.frame.data4 = 0x6F;
-		txMessage.frame.data5 = 0x6C;
-		txMessage.frame.data6 = 0x65;
-		txMessage.frame.data7 = 0x73;
-		CANSPI_Transmit(&txMessage);
+  while (1)
+  {
+	  // Check for new CAN data
+	  if (CANSPI_Receive(&rxMessage)) {
+		  readFromCAN();
+	  }
 
-		HAL_Delay(100);
+	  // Periodically do your torque calculations:
+	  calculateTorqueRequest();
+	  checkAPPSPlausibility();
+	  checkCrossCheck();
+	  checkReadyToDrive();
+	  sendPrechargeRequest();
+	  checkShutdown();  // If pin is high, torque->0, block
 
-		if(CANSPI_Receive(&rxMessage))
-		{
-			uCAN_MSG orangeMessage = rxMessage;
-			uCAN_MSG ppMesage;
-			ppMesage.frame.idType = rxMessage.frame.idType;
-			ppMesage.frame.id = rxMessage.frame.id;
-			ppMesage.frame.dlc = rxMessage.frame.dlc;
-			ppMesage.frame.data0 = rxMessage.frame.data0 | 0xAA;
-			ppMesage.frame.data1 = rxMessage.frame.data1 | 0xAA;
-			ppMesage.frame.data2 = rxMessage.frame.data2 | 0xAA;
-			ppMesage.frame.data3 = rxMessage.frame.data3 | 0xAA;
-			ppMesage.frame.data4 = rxMessage.frame.data4 | 0xAA;
-			ppMesage.frame.data5 = rxMessage.frame.data5 | 0xAA;
-			ppMesage.frame.data6 = rxMessage.frame.data6 | 0xAA;
-			ppMesage.frame.data7 = rxMessage.frame.data7 | 0xAA;
-			uCAN_MSG ppMessage2 = ppMesage;
+	  finalTorqueRequest   = requestedTorque;
+	  lastRequestedTorque  = requestedTorque;
 
-			CANSPI_Transmit(&ppMesage);
+	  // If the driver is ready to drive, send torque over CAN
+	  static uint8_t prevReadyToDrive = 0;
+	  if (readyToDrive) {
+		  // If we just transitioned from not-ready to ready, play sound
+		  if(!prevReadyToDrive){
+			  PlayStartupSoundOnce();
+		  }
+		  sendTorqueCommand();
+	  }
+	  prevReadyToDrive = readyToDrive;
 
-		}
-
-//		readAPPSandBSE();
-//		calculateTorqueRequest();
-//		checkAPPSPlausibility();
-//		checkCrossCheck();
-//
-//		int readyToDriveActivated = readyToDrive;
-//
-//		checkReadyToDrive();
-//		updateBMSDiagnostics();
-//
-//		finalTorqueRequest = requestedTorque;
-//		lastRequestedTorque = requestedTorque;
-//
-//		if (readyToDrive) {
-//			if(!readyToDriveActivated){
-//				PlayStartupSoundOnce();
-//			}
-//			sendTorqueCommand();
-//		}
+	  // ... do other tasks as needed ...
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		// never reached
-	}
+  // Should never get here
+
   /* USER CODE END 3 */
 }
 
@@ -619,7 +603,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 3;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -628,9 +612,9 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Channel = ADC_CHANNEL_2;
   sConfig.Rank = 2;
-  sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -638,7 +622,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_4;
+  sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = 3;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -647,9 +631,8 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_14;
+  sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -753,7 +736,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 4;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 5000;
+  htim3.Init.Period = 10000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -778,39 +761,6 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -821,6 +771,9 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
   /* DMA1_Stream4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
@@ -839,6 +792,7 @@ static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
+
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
@@ -896,23 +850,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RTD_Pin PB5 */
-  GPIO_InitStruct.Pin = RTD_Pin|GPIO_PIN_5;
+  /*Configure GPIO pins : RTD_Pin SHUTDOWN_Pin */
+  GPIO_InitStruct.Pin = RTD_Pin|SHUTDOWN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PRECHARGE_Pin */
   GPIO_InitStruct.Pin = PRECHARGE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(PRECHARGE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : SHUTDOWN_Pin */
-  GPIO_InitStruct.Pin = SHUTDOWN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN2_CS_Pin */
   GPIO_InitStruct.Pin = CAN2_CS_Pin;
@@ -928,19 +876,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
+
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-/* shit for printf support */
-PUTCHAR_PROTOTYPE {
-	/* Place your implementation of fputc here */
-	/* e.g. write a character to the LPUART1 and Loop until the end of transmission */
-	HAL_UART_Transmit(&huart2, (uint8_t*) &ch, 1, 0xFFFF);
 
-	return ch;
-}
 /* USER CODE END 4 */
 
 /**
@@ -950,10 +898,11 @@ PUTCHAR_PROTOTYPE {
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-	/* User can add his own implementation to report the HAL error return state */
-	__disable_irq();
-	while (1) {
-	}
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
   /* USER CODE END Error_Handler_Debug */
 }
 
