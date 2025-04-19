@@ -113,6 +113,8 @@ float bse_as_percent;
 
 // BSE / brake pressed logic
 uint8_t readyToDrive = false;
+uint8_t rtdState = false;
+uint32_t millis_RTD;
 uint8_t prechargeState = false;
 uint32_t millis_precharge;
 
@@ -148,6 +150,7 @@ void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
 void sendPrechargeRequest(void);
+void prechargeSequence(void);
 void checkShutdown(void);
 void PlayStartupSoundOnce(void);
 
@@ -354,13 +357,20 @@ void sendTorqueCommand(void) {
  */
 void checkReadyToDrive(void) {
 	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin);
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL) {
-		readyToDrive = 1;
+	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !readyToDrive) {
+		rtdState = true;
+		millis_RTD = HAL_GetTick();
+	}
+	else if (pinState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL){
+		rtdState = false;
+	}
+	else if(HAL_GetTick()-millis_precharge >= RTD_BUTTON_PRESS_MILLIS){
+		readyToDrive = true;
 	}
 }
 
 /**
- * @brief If a hardware pin requests precharge, send a request via CAN after a short debounce.
+ * @brief If a hardware pin requests precharge, triggers precharge sequence
  */
 void sendPrechargeRequest(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_GPIO_Port, PRECHARGE_Pin);
@@ -371,20 +381,16 @@ void sendPrechargeRequest(void){
 	else if (pinState == GPIO_PIN_RESET){
 		prechargeState = false;
 	}
-	else if(HAL_GetTick()-millis_precharge >= 1000){
-		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-		txMessage.frame.id = PRECHARGE_REQUEST_ID;
-		txMessage.frame.dlc = 8;
-		txMessage.frame.data0 = 2; // your precharge request code
-		txMessage.frame.data1 = 0;
-		txMessage.frame.data2 = 0;
-		txMessage.frame.data3 = 0;
-		txMessage.frame.data4 = 0;
-		txMessage.frame.data5 = 0;
-		txMessage.frame.data6 = 0;
-		txMessage.frame.data7 = 0;
-		CANSPI_Transmit(&txMessage);
+	else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+		prechargeSequence();
 	}
+}
+
+/**
+ * @brief the actual procedure of triggering precharge relays
+ */
+void prechargeSequence(void){
+	//fill this in pls justin
 }
 
 //-----------------------------------------------
@@ -470,9 +476,9 @@ int main(void)
   HAL_TIM_Base_Start(&htim3);
 
   // Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
-//  if (CANSPI_Initialize() != true) {
-//  	Error_Handler();
-//  }
+  if (CANSPI_Initialize() != true) {
+  	Error_Handler();
+  }
 
   // Initialize some diagnostics values
   bms_diagnostics.inverterActive = 0;
@@ -486,11 +492,11 @@ int main(void)
   while (1)
   {
 	  // Check for new CAN data
-//	  if (CANSPI_Receive(&rxMessage)) {
-//		  readFromCAN();
-//	  }
+	  if (CANSPI_Receive(&rxMessage)) {
+		  readFromCAN();
+	  }
 
-	  if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT){
+	  if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT && dma_read_complete){
 		HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 		dma_read_complete = 0;
 		millis_since_dma_read = HAL_GetTick();
@@ -739,7 +745,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 4;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 10000;
+  htim3.Init.Period = 10001;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
