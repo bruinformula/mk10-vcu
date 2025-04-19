@@ -69,8 +69,6 @@ void Error_Handler(void);
 #define CAN2_RESET_GPIO_Port GPIOC
 #define LED2_Pin GPIO_PIN_5
 #define LED2_GPIO_Port GPIOA
-#define RTD_Pin GPIO_PIN_7
-#define RTD_GPIO_Port GPIOA
 #define PRECHARGE_Pin GPIO_PIN_7
 #define PRECHARGE_GPIO_Port GPIOC
 #define SHUTDOWN_Pin GPIO_PIN_9
@@ -83,6 +81,8 @@ void Error_Handler(void);
 #define CAN2_CS_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define RTD_Pin GPIO_PIN_4
+#define RTD_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

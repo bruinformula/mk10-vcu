@@ -60,8 +60,8 @@ all: main-build
 main-build: VCU.elf secondary-outputs
 
 # Tool invocations
-VCU.elf VCU.map: $(OBJS) $(USER_OBJS) D:\Projects\Code\ Projects\vcu-v1-main\mk10-vcu\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "VCU.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\Projects\Code Projects\vcu-v1-main\mk10-vcu\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="VCU.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+VCU.elf VCU.map: $(OBJS) $(USER_OBJS) C:\Users\basim\Downloads\VCU\STM32F401RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "VCU.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\basim\Downloads\VCU\STM32F401RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="VCU.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

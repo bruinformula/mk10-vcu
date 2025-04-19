@@ -8,9 +8,9 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 0;
-const uint16_t APPS2_RANK = 1;
-const uint16_t BSE_RANK = 2;
+const uint16_t APPS1_RANK = 1;
+const uint16_t APPS2_RANK = 2;
+const uint16_t BSE_RANK = 3;
 
 const uint16_t APPS_1_ADC_MIN_VAL = 10;
 const uint16_t APPS_1_ADC_MAX_VAL = 3100;
@@ -39,7 +39,7 @@ const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;
 const uint16_t CROSS_CHECK_RESTORATION_APPS_PERCENT = 5;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
-const uint16_t DMA_READ_TIMEOUT = 10;
+const uint16_t DMA_READ_TIMEOUT = 1000;
 
 const float TORQUE_ARRAY[10][10] = {
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
@@ -58,4 +58,6 @@ const int RPM_READ_ID = 0x0A5;
 const int INVERTER_VOLTAGE_READ_ID = 0x0A7;
 const int BMS_DIAGNOSTICS_ID = 0x6B0;
 const int PRECHARGE_REQUEST_ID = 0x000;
+
+#define ADC_BUFFER 3
 #endif /* INC_CONSTANTS_H_ */

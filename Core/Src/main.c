@@ -81,15 +81,14 @@ DMA_HandleTypeDef hdma_spi2_tx;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim3;
-DMA_HandleTypeDef hdma_tim3_ch4_up;
 
 /* USER CODE BEGIN PV */
 uCAN_MSG txMessage;
 uCAN_MSG rxMessage;
 
-uint16_t apps1Value;
-uint16_t apps2Value;
-uint16_t bseValue;
+volatile uint32_t apps1Value = 0;
+volatile uint32_t apps2Value = 0;
+volatile uint32_t bseValue = 0;
 
 float requestedTorque;
 float lastRequestedTorque = 0;
@@ -98,14 +97,14 @@ float finalTorqueRequest;
 // APPS plausibility
 uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
-uint32_t millis_since_dma_read;
+uint8_t dma_read_complete = 1;
+uint32_t millis_since_dma_read = 0;
 
 // Cross-check plausibility
 uint16_t cross_check_plausible = true;
 
 // ADC buffer
-uint32_t ADC_Reads[3];
-uint32_t ADC_BUFFER = 3;
+uint32_t ADC_Reads[ADC_BUFFER];
 
 // Temp variables for display or logic
 float apps1_as_percent;
@@ -215,11 +214,11 @@ void updateBMSDiagnostics(void) {
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	// Because DMAContinuousRequests is enabled and triggered by TIM3,
 	// this will be called repeatedly on each conversion sequence.
-	apps1Value = ADC_Reads[APPS1_RANK];
-	apps2Value = ADC_Reads[APPS2_RANK];
-	bseValue   = ADC_Reads[BSE_RANK];
+	apps1Value = ADC_Reads[APPS1_RANK-1];
+	apps2Value = ADC_Reads[APPS2_RANK-1];
+	bseValue   = ADC_Reads[BSE_RANK-1];
+	dma_read_complete = 1;
 
-	millis_since_dma_read = HAL_GetTick();
 }
 
 /**
@@ -471,18 +470,14 @@ int main(void)
   HAL_TIM_Base_Start(&htim3);
 
   // Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
-  if (CANSPI_Initialize() != true) {
-  	Error_Handler();
-  }
+//  if (CANSPI_Initialize() != true) {
+//  	Error_Handler();
+//  }
 
   // Initialize some diagnostics values
   bms_diagnostics.inverterActive = 0;
   inverter_diagnostics.motorRpm   = 0;
 
-  // Start ADC in DMA mode
-  // This will trigger on each rising edge of TIM3 TRGO, in combination
-  // with hadc1.Init.DMAContinuousRequests = ENABLE.
-  HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
   /* USER CODE END 2 */
 
@@ -491,15 +486,22 @@ int main(void)
   while (1)
   {
 	  // Check for new CAN data
-	  if (CANSPI_Receive(&rxMessage)) {
-		  readFromCAN();
+//	  if (CANSPI_Receive(&rxMessage)) {
+//		  readFromCAN();
+//	  }
+
+	  if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT){
+		HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+		dma_read_complete = 0;
+		millis_since_dma_read = HAL_GetTick();
 	  }
+
 
 	  // Periodically do your torque calculations:
 	  calculateTorqueRequest();
 	  checkAPPSPlausibility();
 	  checkCrossCheck();
-	  checkReadyToDrive();
+
 	  sendPrechargeRequest();
 	  checkShutdown();  // If pin is high, torque->0, block
 
@@ -507,7 +509,8 @@ int main(void)
 	  lastRequestedTorque  = requestedTorque;
 
 	  // If the driver is ready to drive, send torque over CAN
-	  static uint8_t prevReadyToDrive = 0;
+	  uint8_t prevReadyToDrive = readyToDrive;
+	  checkReadyToDrive();
 	  if (readyToDrive) {
 		  // If we just transitioned from not-ready to ready, play sound
 		  if(!prevReadyToDrive){
@@ -603,7 +606,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 3;
-  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -612,7 +615,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Channel = ADC_CHANNEL_14;
   sConfig.Rank = 2;
   sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -622,7 +625,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_3;
+  sConfig.Channel = ADC_CHANNEL_15;
   sConfig.Rank = 3;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -771,9 +774,6 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA1_Stream2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
   /* DMA1_Stream4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
@@ -814,7 +814,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(RTD_GPIO_Port, RTD_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -843,6 +843,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : PA2 PA3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pin : LED2_Pin */
   GPIO_InitStruct.Pin = LED2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -850,17 +858,23 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RTD_Pin SHUTDOWN_Pin */
-  GPIO_InitStruct.Pin = RTD_Pin|SHUTDOWN_Pin;
+  /*Configure GPIO pins : PB2 PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PRECHARGE_Pin */
   GPIO_InitStruct.Pin = PRECHARGE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(PRECHARGE_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SHUTDOWN_Pin */
+  GPIO_InitStruct.Pin = SHUTDOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN2_CS_Pin */
   GPIO_InitStruct.Pin = CAN2_CS_Pin;
@@ -869,18 +883,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pin : RTD_Pin */
+  GPIO_InitStruct.Pin = RTD_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(RTD_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
