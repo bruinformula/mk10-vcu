@@ -344,8 +344,8 @@ void sendTorqueCommand(void) {
 	txMessage.frame.data1 = msg1;
 	txMessage.frame.data2 = 0;
 	txMessage.frame.data3 = 0;
-	txMessage.frame.data4 = 0;
-	txMessage.frame.data5 = 0;
+	txMessage.frame.data4 = 1;
+	txMessage.frame.data5 = 1;
 	txMessage.frame.data6 = 0;
 	txMessage.frame.data7 = 0;
 
