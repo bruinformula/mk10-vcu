@@ -94,6 +94,8 @@ float requestedTorque;
 float lastRequestedTorque = 0;
 float finalTorqueRequest;
 
+uint8_t beginTorqueRequests = false;
+
 // APPS plausibility
 uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
@@ -345,7 +347,13 @@ void sendTorqueCommand(void) {
 	txMessage.frame.data2 = 0;
 	txMessage.frame.data3 = 0;
 	txMessage.frame.data4 = 1;
-	txMessage.frame.data5 = 1;
+
+	//lockout
+	if(beginTorqueRequests){
+		txMessage.frame.data5 = 0;
+	}else{
+		txMessage.frame.data5 = 1;
+	}
 	txMessage.frame.data6 = 0;
 	txMessage.frame.data7 = 0;
 
@@ -517,10 +525,13 @@ int main(void)
 	  // If the driver is ready to drive, send torque over CAN
 	  uint8_t prevReadyToDrive = readyToDrive;
 	  checkReadyToDrive();
-	  if (readyToDrive) {
+	  if (readyToDrive && cross_check_plausible && apps_plausible) {
 		  // If we just transitioned from not-ready to ready, play sound
 		  if(!prevReadyToDrive){
+			  beginTorqueRequests = true;
 			  PlayStartupSoundOnce();
+		  }else{
+			  beginTorqueRequests = false;
 		  }
 		  sendTorqueCommand();
 	  }
