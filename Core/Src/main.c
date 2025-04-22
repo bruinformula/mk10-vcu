@@ -525,7 +525,7 @@ int main(void)
 	  // If the driver is ready to drive, send torque over CAN
 	  uint8_t prevReadyToDrive = readyToDrive;
 	  checkReadyToDrive();
-	  if (readyToDrive && cross_check_plausible && apps_plausible) {
+	  if (readyToDrive) {
 		  // If we just transitioned from not-ready to ready, play sound
 		  if(!prevReadyToDrive){
 			  beginTorqueRequests = true;
