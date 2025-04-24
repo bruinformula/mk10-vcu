@@ -7,45 +7,45 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
   1 .text         00005f34  08000194  08000194  00001194  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, CODE
-  2 .rodata       00050100  080060c8  080060c8  000070c8  2**2
+  2 .rodata       0006f0f0  080060c8  080060c8  000070c8  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  3 .ARM.extab    00000000  080561c8  080561c8  00058014  2**0
+  3 .ARM.extab    00000000  080751b8  080751b8  00077014  2**0
                   CONTENTS, READONLY
-  4 .ARM          00000008  080561c8  080561c8  000571c8  2**2
+  4 .ARM          00000008  080751b8  080751b8  000761b8  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  5 .preinit_array 00000000  080561d0  080561d0  00058014  2**0
+  5 .preinit_array 00000000  080751c0  080751c0  00077014  2**0
                   CONTENTS, ALLOC, LOAD, DATA
-  6 .init_array   00000004  080561d0  080561d0  000571d0  2**2
+  6 .init_array   00000004  080751c0  080751c0  000761c0  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  7 .fini_array   00000004  080561d4  080561d4  000571d4  2**2
+  7 .fini_array   00000004  080751c4  080751c4  000761c4  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  8 .data         00000014  20000000  080561d8  00058000  2**2
+  8 .data         00000014  20000000  080751c8  00077000  2**2
                   CONTENTS, ALLOC, LOAD, DATA
-  9 .bss          000002c8  20000018  080561ec  00058018  2**3
+  9 .bss          000002c8  20000018  080751dc  00077018  2**3
                   ALLOC
- 10 ._user_heap_stack 00000600  200002e0  080561ec  000582e0  2**0
+ 10 ._user_heap_stack 00000600  200002e0  080751dc  000772e0  2**0
                   ALLOC
- 11 .ARM.attributes 00000030  00000000  00000000  00058014  2**0
+ 11 .ARM.attributes 00000030  00000000  00000000  00077014  2**0
                   CONTENTS, READONLY
- 12 .debug_info   000138b5  00000000  00000000  00058044  2**0
+ 12 .debug_info   000138b5  00000000  00000000  00077044  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_abbrev 00002c17  00000000  00000000  0006b8f9  2**0
+ 13 .debug_abbrev 00002c17  00000000  00000000  0008a8f9  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 14 .debug_aranges 00001288  00000000  00000000  0006e510  2**3
+ 14 .debug_aranges 00001288  00000000  00000000  0008d510  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 15 .debug_rnglists 00000e8e  00000000  00000000  0006f798  2**0
+ 15 .debug_rnglists 00000e8e  00000000  00000000  0008e798  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_macro  00018a84  00000000  00000000  00070626  2**0
+ 16 .debug_macro  00018a84  00000000  00000000  0008f626  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   000156e6  00000000  00000000  000890aa  2**0
+ 17 .debug_line   000156e6  00000000  00000000  000a80aa  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0009eeff  00000000  00000000  0009e790  2**0
+ 18 .debug_str    0009eeff  00000000  00000000  000bd790  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  0013d68f  2**0
+ 19 .comment      00000043  00000000  00000000  0015c68f  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  00004e60  00000000  00000000  0013d6d4  2**2
+ 20 .debug_frame  00004e60  00000000  00000000  0015c6d4  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_line_str 0000005e  00000000  00000000  00142534  2**0
+ 21 .debug_line_str 0000005e  00000000  00000000  00161534  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -1089,7 +1089,7 @@ void PlayStartupSoundOnce(void)
  8000aae:	bd80      	pop	{r7, pc}
  8000ab0:	200002d0 	.word	0x200002d0
  8000ab4:	080060fc 	.word	0x080060fc
- 8000ab8:	000500d8 	.word	0x000500d8
+ 8000ab8:	0006f0c8 	.word	0x0006f0c8
  8000abc:	200002d4 	.word	0x200002d4
  8000ac0:	200002cc 	.word	0x200002cc
  8000ac4:	200002d8 	.word	0x200002d8
@@ -5199,7 +5199,7 @@ LoopFillZerobss:
   ldr r1, =_edata
  8002200:	20000014 	.word	0x20000014
   ldr r2, =_sidata
- 8002204:	080561d8 	.word	0x080561d8
+ 8002204:	080751c8 	.word	0x080751c8
   ldr r2, =_sbss
  8002208:	20000018 	.word	0x20000018
   ldr r4, =_ebss
@@ -8412,7 +8412,7 @@ static uint32_t DMA_CalcBaseAndBitshift(DMA_HandleTypeDef *hdma)
  8003324:	4770      	bx	lr
  8003326:	bf00      	nop
  8003328:	aaaaaaab 	.word	0xaaaaaaab
- 800332c:	080561c0 	.word	0x080561c0
+ 800332c:	080751b0 	.word	0x080751b0
 
 08003330 <DMA_CheckFifoParam>:
   * @param  hdma       pointer to a DMA_HandleTypeDef structure that contains
@@ -12444,7 +12444,7 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(RCC_ClkInitTypeDef  *RCC_ClkInitStruct, ui
  8004972:	bf00      	nop
  8004974:	40023c00 	.word	0x40023c00
  8004978:	40023800 	.word	0x40023800
- 800497c:	080561a8 	.word	0x080561a8
+ 800497c:	08075198 	.word	0x08075198
  8004980:	20000008 	.word	0x20000008
  8004984:	2000000c 	.word	0x2000000c
 
@@ -12746,7 +12746,7 @@ uint32_t HAL_RCC_GetPCLK1Freq(void)
  8004bc8:	4618      	mov	r0, r3
  8004bca:	bd80      	pop	{r7, pc}
  8004bcc:	40023800 	.word	0x40023800
- 8004bd0:	080561b8 	.word	0x080561b8
+ 8004bd0:	080751a8 	.word	0x080751a8
 
 08004bd4 <HAL_RCC_GetPCLK2Freq>:
   * @note   Each time PCLK2 changes, this function must be called to update the
@@ -12772,7 +12772,7 @@ uint32_t HAL_RCC_GetPCLK2Freq(void)
  8004bf0:	4618      	mov	r0, r3
  8004bf2:	bd80      	pop	{r7, pc}
  8004bf4:	40023800 	.word	0x40023800
- 8004bf8:	080561b8 	.word	0x080561b8
+ 8004bf8:	080751a8 	.word	0x080751a8
 
 08004bfc <HAL_RCCEx_PeriphCLKConfig>:
   *        domain (RTC and RCC_BDCR register expect BKPSRAM) will be reset
@@ -16063,10 +16063,10 @@ static void UART_SetConfig(UART_HandleTypeDef *huart)
  800609a:	4798      	blx	r3
  800609c:	3601      	adds	r6, #1
  800609e:	e7f2      	b.n	8006086 <__libc_init_array+0x1e>
- 80060a0:	080561d0 	.word	0x080561d0
- 80060a4:	080561d0 	.word	0x080561d0
- 80060a8:	080561d0 	.word	0x080561d0
- 80060ac:	080561d4 	.word	0x080561d4
+ 80060a0:	080751c0 	.word	0x080751c0
+ 80060a4:	080751c0 	.word	0x080751c0
+ 80060a8:	080751c0 	.word	0x080751c0
+ 80060ac:	080751c4 	.word	0x080751c4
 
 080060b0 <_init>:
  80060b0:	b5f8      	push	{r3, r4, r5, r6, r7, lr}
