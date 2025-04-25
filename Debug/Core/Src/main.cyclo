@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 ../Core/Src/main.c:808:13:MX_GPIO_Init	1
 ../Core/Src/main.c:786:13:MX_DMA_Init	1
 ../Core/Src/main.c:179:6:updateRpm	1
@@ -21,3 +22,30 @@
 ../Core/Src/main.c:671:13:MX_I2S2_Init	1
 ../Core/Src/main.c:554:6:SystemClock_Config	1
 ../Core/Src/main.c:453:5:main	6
+=======
+../Core/Src/main.c:180:6:updateRpm	1
+../Core/Src/main.c:185:6:readFromCAN	3
+../Core/Src/main.c:193:6:updateBMSDiagnostics	1
+../Core/Src/main.c:215:6:readAPPSandBSE	2
+../Core/Src/main.c:225:6:calculateTorqueRequest	4
+../Core/Src/main.c:273:6:checkAPPSPlausibility	4
+../Core/Src/main.c:294:6:checkCrossCheck	5
+../Core/Src/main.c:316:6:sendTorqueCommand	1
+../Core/Src/main.c:338:6:checkReadyToDrive	5
+../Core/Src/main.c:346:6:sendPrechargeRequest	5
+../Core/Src/main.c:375:6:HAL_I2S_TxCpltCallback	4
+../Core/Src/main.c:390:13:StartNextChunk	2
+../Core/Src/main.c:408:6:PlayStartupSoundOnce	1
+../Core/Src/main.c:418:6:checkShutdown	5
+../Core/Src/main.c:441:5:main	4
+../Core/Src/main.c:577:6:SystemClock_Config	3
+../Core/Src/main.c:624:13:MX_ADC1_Init	5
+../Core/Src/main.c:695:13:MX_I2S2_Init	2
+../Core/Src/main.c:729:13:MX_SPI3_Init	2
+../Core/Src/main.c:767:13:MX_TIM3_Init	4
+../Core/Src/main.c:812:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:843:13:MX_DMA_Init	1
+../Core/Src/main.c:865:13:MX_GPIO_Init	1
+../Core/Src/main.c:964:1:__io_putchar	1
+../Core/Src/main.c:977:6:Error_Handler	1
+>>>>>>> Stashed changes
