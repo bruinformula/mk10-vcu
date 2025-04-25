@@ -365,11 +365,11 @@ void sendTorqueCommand(void) {
  */
 void checkReadyToDrive(void) {
 	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin);
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !readyToDrive) {
+	if (pinState == GPIO_PIN_RESET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
 	}
-	else if (pinState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL){
+	else if (pinState == GPIO_PIN_SET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
 	}
 	else if(HAL_GetTick()-millis_precharge >= RTD_BUTTON_PRESS_MILLIS){
@@ -382,11 +382,11 @@ void checkReadyToDrive(void) {
  */
 void sendPrechargeRequest(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_GPIO_Port, PRECHARGE_Pin);
-	if(pinState == GPIO_PIN_SET && !prechargeState){
+	if(pinState == GPIO_PIN_RESET && !prechargeState){
 		prechargeState = true;
 		millis_precharge = HAL_GetTick();
 	}
-	else if (pinState == GPIO_PIN_RESET){
+	else if (pinState == GPIO_PIN_SET){
 		prechargeState = false;
 	}
 	else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
@@ -830,14 +830,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(RTD_GPIO_Port, RTD_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  /*Configure GPIO pins : RTD_Pin PRECHARGE_Pin */
+  GPIO_InitStruct.Pin = RTD_Pin|PRECHARGE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LED1_Pin */
   GPIO_InitStruct.Pin = LED1_Pin;
@@ -881,12 +878,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PRECHARGE_Pin */
-  GPIO_InitStruct.Pin = PRECHARGE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PRECHARGE_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pin : SHUTDOWN_Pin */
   GPIO_InitStruct.Pin = SHUTDOWN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -899,13 +890,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : RTD_Pin */
-  GPIO_InitStruct.Pin = RTD_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(RTD_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

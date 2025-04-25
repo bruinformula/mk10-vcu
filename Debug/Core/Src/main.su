@@ -1,4 +1,4 @@
-../Core/Src/main.c:808:13:MX_GPIO_Init	80	static
+../Core/Src/main.c:808:13:MX_GPIO_Init	72	static
 ../Core/Src/main.c:786:13:MX_DMA_Init	16	static
 ../Core/Src/main.c:179:6:updateRpm	0	static
 ../Core/Src/main.c:199:6:updateBMSDiagnostics	0	static
@@ -14,7 +14,7 @@
 ../Core/Src/main.c:400:6:prechargeSequence	0	static
 ../Core/Src/main.c:410:6:HAL_I2S_TxCpltCallback	8	static
 ../Core/Src/main.c:432:6:PlayStartupSoundOnce	8	static
-../Core/Src/main.c:923:6:Error_Handler	0	static,ignoring_inline_asm
+../Core/Src/main.c:907:6:Error_Handler	0	static,ignoring_inline_asm
 ../Core/Src/main.c:601:13:MX_ADC1_Init	24	static
 ../Core/Src/main.c:743:13:MX_TIM3_Init	32	static
 ../Core/Src/main.c:705:13:MX_SPI3_Init	8	static
