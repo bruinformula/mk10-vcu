@@ -117,6 +117,7 @@ float bse_as_percent;
 // BSE / brake pressed logic
 uint8_t readyToDrive = false;
 uint8_t rtdState = false;
+uint32_t cpockandballs;
 uint32_t millis_RTD;
 uint8_t prechargeState = false;
 uint32_t millis_precharge;
@@ -131,6 +132,9 @@ static const uint16_t *wavePCM = NULL;     // pointer to PCM data in Flash
 static uint32_t halfwordCount = 0;         // total halfwords
 static uint8_t waveFinished = 0;           // flag if wave is finished
 
+
+// customiABILTY shits
+const uint8_t BMS_TYPE = ORION_BMS;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -157,6 +161,7 @@ uint8_t prechargeSequence(void);
 void checkShutdown(void);
 void PlayStartupSoundOnce(void);
 void updateInverterVolts(void);
+void lookForRTD(void);
 
 /* USER CODE END PFP */
 
@@ -171,12 +176,13 @@ void checkShutdown(){
 	if (pinState == GPIO_PIN_RESET) {
 		requestedTorque = 0;
 		sendTorqueCommand();
-		while(true){}
+		readyToDrive = false;
+			lookForRTD();
 	}
 }
 
 /**
- * @brief Update Inverter RPM reading from the last received CAN message.
+// * @brief Update Inverter RPM reading from the last received CAN message.
  */
 void updateRpm() {
 	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2
@@ -247,54 +253,68 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 /**
  * @brief Calculate the requested torque based on APPS and RPM, or regen based on BSE.
  */
-void calculateTorqueRequest(void) {
-	float apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
-					/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL);
-	float apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
-					/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL);
-	float appsValue = (apps1_as_percent + apps2_as_percent) / 2.0f;
+//void calculateTorqueRequest(void) {
+//	float apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
+//					/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL);
+//	float apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
+//					/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL);
+//	float appsValue = (apps1_as_percent + apps2_as_percent) / 2.0f;
+//
+//	if (appsValue > 0) {
+//		// Pedal-based torque map
+//		int numPedalSteps = 10;
+//		int numRpmSteps   = 10;
+//
+//		float pedalStepSize = 100.0f / (numPedalSteps - 1);
+//		float rpmStepSize   = MAX_RPM / (numRpmSteps - 1);
+//
+//		int pedalLowIndx = (int)(appsValue / (pedalStepSize / 100.0f));  // handle properly if needed
+//		int pedalHighIndx = pedalLowIndx + 1;
+//		if (pedalHighIndx >= numPedalSteps) {
+//			pedalHighIndx = numPedalSteps - 1;
+//		}
+//
+//		int rpmLowIndx = (int)(inverter_diagnostics.motorRpm / rpmStepSize);
+//		int rpmHighIndx = rpmLowIndx + 1;
+//		if (rpmHighIndx >= numRpmSteps) {
+//			rpmHighIndx = numRpmSteps - 1;
+//		}
+//
+//		float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];   // Lower-left
+//		float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx];  // Upper-left
+//		float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx];  // Lower-right
+//		float T11 = TORQUE_ARRAY[pedalHighIndx][rpmHighIndx]; // Upper-right
+//
+//		float pedalLerp = (appsValue * 100.0f - (pedalLowIndx * pedalStepSize)) / pedalStepSize;
+//		float rpmLerp   = (float)(inverter_diagnostics.motorRpm - (rpmLowIndx * rpmStepSize)) / rpmStepSize;
+//
+//		float torqueLow  = T00 + (T01 - T00) * rpmLerp;
+//		float torqueHigh = T10 + (T11 - T10) * rpmLerp;
+//
+//		requestedTorque = torqueLow + (torqueHigh - torqueLow) * pedalLerp;
+//	}
+//	else {
+//		// Regen based on brake pedal
+//		float bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
+//						/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL);
+//		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)
+//						* bse_as_percent + REGEN_BASELINE_TORQUE;
+//	}
+//}
 
-	if (appsValue > 0) {
-		// Pedal-based torque map
-		int numPedalSteps = 10;
-		int numRpmSteps   = 10;
+void calculateTorqueRequest(void)
+ {
 
-		float pedalStepSize = 100.0f / (numPedalSteps - 1);
-		float rpmStepSize   = MAX_RPM / (numRpmSteps - 1);
-
-		int pedalLowIndx = (int)(appsValue / (pedalStepSize / 100.0f));  // handle properly if needed
-		int pedalHighIndx = pedalLowIndx + 1;
-		if (pedalHighIndx >= numPedalSteps) {
-			pedalHighIndx = numPedalSteps - 1;
-		}
-
-		int rpmLowIndx = (int)(inverter_diagnostics.motorRpm / rpmStepSize);
-		int rpmHighIndx = rpmLowIndx + 1;
-		if (rpmHighIndx >= numRpmSteps) {
-			rpmHighIndx = numRpmSteps - 1;
-		}
-
-		float T00 = TORQUE_ARRAY[pedalLowIndx][rpmLowIndx];   // Lower-left
-		float T10 = TORQUE_ARRAY[pedalHighIndx][rpmLowIndx];  // Upper-left
-		float T01 = TORQUE_ARRAY[pedalLowIndx][rpmHighIndx];  // Lower-right
-		float T11 = TORQUE_ARRAY[pedalHighIndx][rpmHighIndx]; // Upper-right
-
-		float pedalLerp = (appsValue * 100.0f - (pedalLowIndx * pedalStepSize)) / pedalStepSize;
-		float rpmLerp   = (float)(inverter_diagnostics.motorRpm - (rpmLowIndx * rpmStepSize)) / rpmStepSize;
-
-		float torqueLow  = T00 + (T01 - T00) * rpmLerp;
-		float torqueHigh = T10 + (T11 - T10) * rpmLerp;
-
-		requestedTorque = torqueLow + (torqueHigh - torqueLow) * pedalLerp;
-	}
-	else {
-		// Regen based on brake pedal
-		float bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
-						/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL);
-		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)
-						* bse_as_percent + REGEN_BASELINE_TORQUE;
-	}
-}
+ 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
+ 	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
+ 	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
+ 	if(appsValue >= 0){
+ 		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
+ 	}else{
+ 		float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+ 		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+ 	}
+ }
 
 /**
  * @brief Check plausibility of APPS sensors.
@@ -385,14 +405,15 @@ void sendTorqueCommand(void) {
  */
 void checkReadyToDrive(void) {
 	uint8_t pinState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
-	if (pinState == GPIO_PIN_SET && bseValue < BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
+	cpockandballs = HAL_GetTick() -millis_RTD;
+	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
 	}
-	else if (pinState == GPIO_PIN_RESET || bseValue > BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+	else if (pinState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
 	}
-	else if(HAL_GetTick()-millis_precharge >= RTD_BUTTON_PRESS_MILLIS){
+	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
 }
@@ -402,15 +423,19 @@ void checkReadyToDrive(void) {
  */
 void sendPrechargeRequest(void){
 	uint8_t pinState = HAL_GPIO_ReadPin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin);
-	if(pinState == GPIO_PIN_RESET && !prechargeState){
-		prechargeState = true;
-		millis_precharge = HAL_GetTick();
-	}
-	else if (pinState == GPIO_PIN_SET){
-		prechargeState = false;
-	}
-	else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-		prechargeSequence();
+	if (BMS_TYPE == ORION_BMS) {
+		if(pinState == GPIO_PIN_RESET && !prechargeState){
+			prechargeState = true;
+			millis_precharge = HAL_GetTick();
+		}
+		else if (pinState == GPIO_PIN_SET){
+			prechargeState = false;
+		}
+		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+			prechargeSequence();
+		}
+	} else if (BMS_TYPE == CUSTOM_BMS) {
+		while (1) {}
 	}
 }
 
@@ -421,7 +446,7 @@ void sendPrechargeRequest(void){
  * 3) spam bms reads
  * 3.5) wait until voltage is within 10v of bms packvolts
  * 3.75) timeout at 3s or something like that, prob less
- * 4) close positive air if successful precharge and then open precharge relay after short delay
+ * 4) close positive air if successful precharge and then  precharge relay after short delay
  * 4.5) if prechg is unsuccessful, open neg air and precharge and error and infinite loop
  *
  *@return returns 1 if precharge successful, infinite loop if it doesn't work
@@ -430,15 +455,19 @@ uint8_t prechargeSequence(void){
 	uint32_t startPrechargeTime = HAL_GetTick();
 
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+	  HAL_Delay(3);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 
 
-	  while (startPrechargeTime - HAL_GetTick() < PRECHARGE_TIMEOUT_MS) {
+	  while (startPrechargeTime - HAL_GetTick() < PRECHARGE_TIMEOUT_MS) { //loop for 4
+
+		  //get inverter & BMS can data
 		  if (CANSPI_Receive(&rxMessage)) {
 			  readFromCAN();
 		  }
 
 		  if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts > PRECHARGE_VOLTAGE_DIFF) {
+
 			  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //step 4
 			  HAL_Delay(5);
 			  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
@@ -508,8 +537,9 @@ void lookForRTD(void) {
 	}
 	while(!readyToDrive) {
 
-//		readFromCAN();
-
+		if (CANSPI_Receive(&rxMessage)) {
+			readFromCAN();
+		}
 
 		if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT && dma_read_complete){
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
@@ -517,7 +547,11 @@ void lookForRTD(void) {
 			millis_since_dma_read = HAL_GetTick();
 		}
 
+		//add check for make sure apps are 0 travel
+
 		while(!prechargeState){
+//			checkAPPSPlausibility();
+//			checkCrossCheck();
 			sendPrechargeRequest();
 		}
 		// If the driver is ready to drive, send torque over CAN
