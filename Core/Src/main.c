@@ -58,6 +58,7 @@ typedef struct {
 
 typedef struct {
 	int motorRpm;
+	int inverterDCVolts;
 	// Add more fields as needed
 } InverterDiagnostics;  // The type alias is InverterDiagnostics
 /* USER CODE END PTD */
@@ -152,9 +153,10 @@ void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
 void sendPrechargeRequest(void);
-void prechargeSequence(void);
+uint8_t prechargeSequence(void);
 void checkShutdown(void);
 void PlayStartupSoundOnce(void);
+void updateInverterVolts(void);
 
 /* USER CODE END PFP */
 
@@ -188,7 +190,12 @@ void readFromCAN() {
 	if (rxMessage.frame.id == RPM_READ_ID) {
 		updateRpm();
 	}
-	else if(rxMessage.frame.id == BMS_DIAGNOSTICS_ID){
+
+	if (rxMessage.frame.id == INVERTER_VOLTAGE_READ_ID) {
+		updateInverterVolts();
+	}
+
+	if(rxMessage.frame.id == BMS_DIAGNOSTICS_ID){
 		updateBMSDiagnostics();
 	}
 }
@@ -211,6 +218,17 @@ void updateBMSDiagnostics(void) {
 	bms_diagnostics.inverterActive = is_ready ? 1 : 0;
 	bms_diagnostics.packCurrent    = (int)pack_current;
 	bms_diagnostics.packVoltage    = (int)pack_voltage;
+}
+
+/**
+ * @brief Parse BMS diagnostics from a received CAN message
+ */
+void updateInverterVolts(void) {
+	// DC volts (signed 16-bit at bit 8, factor 0.1)
+	int16_t inverter_dc_volts_raw = (int16_t)((rxMessage.frame.data1 << 8) | rxMessage.frame.data0);  // Little-endian
+	float inverter_dc_volts = inverter_dc_volts_raw * 0.1f;
+
+	inverter_diagnostics.inverterDCVolts    = (int)inverter_dc_volts;
 }
 
 /**
@@ -286,6 +304,8 @@ void checkAPPSPlausibility(void) {
 					/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
 	apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
 					/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
+
+	float paininmyass = fabsf(apps1_as_percent - apps2_as_percent);
 
 	if (fabsf(apps1_as_percent - apps2_as_percent) > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		millis_since_apps_implausible = HAL_GetTick();
@@ -364,7 +384,7 @@ void sendTorqueCommand(void) {
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
  */
 void checkReadyToDrive(void) {
-	uint8_t pinState = HAL_GPIO_ReadPin(RTD_GPIO_Port, RTD_Pin);
+	uint8_t pinState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	if (pinState == GPIO_PIN_SET && bseValue < BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
@@ -381,7 +401,7 @@ void checkReadyToDrive(void) {
  * @brief If a hardware pin requests precharge, triggers precharge sequence
  */
 void sendPrechargeRequest(void){
-	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_GPIO_Port, PRECHARGE_Pin);
+	uint8_t pinState = HAL_GPIO_ReadPin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin);
 	if(pinState == GPIO_PIN_RESET && !prechargeState){
 		prechargeState = true;
 		millis_precharge = HAL_GetTick();
@@ -396,8 +416,42 @@ void sendPrechargeRequest(void){
 
 /**
  * @brief the actual procedure of triggering precharge relays
+ * 1) air- closes
+ * 2) precharge closes
+ * 3) spam bms reads
+ * 3.5) wait until voltage is within 10v of bms packvolts
+ * 3.75) timeout at 3s or something like that, prob less
+ * 4) close positive air if successful precharge and then open precharge relay after short delay
+ * 4.5) if prechg is unsuccessful, open neg air and precharge and error and infinite loop
+ *
+ *@return returns 1 if precharge successful, infinite loop if it doesn't work
  */
-void prechargeSequence(void){
+uint8_t prechargeSequence(void){
+	uint32_t startPrechargeTime = HAL_GetTick();
+
+	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+
+
+	  while (startPrechargeTime - HAL_GetTick() < PRECHARGE_TIMEOUT_MS) {
+		  if (CANSPI_Receive(&rxMessage)) {
+			  readFromCAN();
+		  }
+
+		  if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts > PRECHARGE_VOLTAGE_DIFF) {
+			  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //step 4
+			  HAL_Delay(5);
+			  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+			  return 1;
+		  }
+	  }
+
+	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
+	  while (1) {
+
+	  }
+
 	//fill this in pls justin
 }
 
@@ -455,6 +509,7 @@ void lookForRTD(void) {
 	while(!readyToDrive) {
 
 //		readFromCAN();
+
 
 		if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT && dma_read_complete){
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
@@ -888,7 +943,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, LED1_Pin|PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, CAN_CS_Pin|CAN1_RESET_Pin|CAN2_RESET_Pin, GPIO_PIN_SET);
@@ -899,12 +954,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : LED1_Pin */
-  GPIO_InitStruct.Pin = LED1_Pin;
+  /*Configure GPIO pins : LED1_Pin PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
+  GPIO_InitStruct.Pin = LED1_Pin|PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN_CS_Pin */
   GPIO_InitStruct.Pin = CAN_CS_Pin;
@@ -935,23 +990,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RTD_Pin PB5 */
-  GPIO_InitStruct.Pin = RTD_Pin|GPIO_PIN_5;
+  /*Configure GPIO pins : RTD_BTN_Pin PB5 */
+  GPIO_InitStruct.Pin = RTD_BTN_Pin|GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PRECHARGE_Pin */
-  GPIO_InitStruct.Pin = PRECHARGE_Pin;
+  /*Configure GPIO pins : PRECHARGE_BTN_Pin SHUTDOWN_Pin */
+  GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin|SHUTDOWN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PRECHARGE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : SHUTDOWN_Pin */
-  GPIO_InitStruct.Pin = SHUTDOWN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN2_CS_Pin */
   GPIO_InitStruct.Pin = CAN2_CS_Pin;
