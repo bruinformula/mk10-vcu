@@ -57,8 +57,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define RTD_Pin GPIO_PIN_13
-#define RTD_GPIO_Port GPIOC
 #define LED1_Pin GPIO_PIN_0
 #define LED1_GPIO_Port GPIOC
 #define CAN_CS_Pin GPIO_PIN_1
@@ -69,6 +67,8 @@ void Error_Handler(void);
 #define CAN2_RESET_GPIO_Port GPIOC
 #define LED2_Pin GPIO_PIN_5
 #define LED2_GPIO_Port GPIOA
+#define RTD_Pin GPIO_PIN_2
+#define RTD_GPIO_Port GPIOB
 #define PRECHARGE_Pin GPIO_PIN_7
 #define PRECHARGE_GPIO_Port GPIOC
 #define SHUTDOWN_Pin GPIO_PIN_9
