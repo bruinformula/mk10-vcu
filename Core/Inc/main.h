@@ -77,14 +77,14 @@ void Error_Handler(void);
 #define AIR_N_CTRL_GPIO_Port GPIOC
 #define PRECHARGE_BTN_Pin GPIO_PIN_8
 #define PRECHARGE_BTN_GPIO_Port GPIOA
-#define SHUTDOWN_Pin GPIO_PIN_9
-#define SHUTDOWN_GPIO_Port GPIOA
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
 #define CAN2_CS_Pin GPIO_PIN_15
 #define CAN2_CS_GPIO_Port GPIOA
+#define SHUTDOWN_Pin GPIO_PIN_2
+#define SHUTDOWN_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 

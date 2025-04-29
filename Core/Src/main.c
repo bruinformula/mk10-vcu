@@ -120,6 +120,7 @@ uint8_t rtdState = false;
 uint32_t cpockandballs;
 uint32_t millis_RTD;
 uint8_t prechargeState = false;
+uint8_t prechargeFinished = false;
 uint32_t millis_precharge;
 
 // Diagnostics structures
@@ -177,7 +178,7 @@ void checkShutdown(){
 		requestedTorque = 0;
 		sendTorqueCommand();
 		readyToDrive = false;
-			lookForRTD();
+		lookForRTD();
 	}
 }
 
@@ -219,7 +220,7 @@ void updateBMSDiagnostics(void) {
 	float pack_voltage = pack_voltage_raw * 0.1f;
 
 	// Is_Ready_State (bit 54)
-	bool is_ready = (rxMessage.frame.data6 >> 6) & 0x01;
+	bool is_ready = (rxMessage.frame.data6) & 0x01;
 
 	bms_diagnostics.inverterActive = is_ready ? 1 : 0;
 	bms_diagnostics.packCurrent    = (int)pack_current;
@@ -342,7 +343,7 @@ void checkAPPSPlausibility(void) {
 }
 
 /**
- * @brief Check cross-check between APPS and brake pedal.
+ * @brief Check rank-check between APPS and brake pedal.
  */
 void checkCrossCheck(void) {
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
@@ -422,17 +423,18 @@ void checkReadyToDrive(void) {
  * @brief If a hardware pin requests precharge, triggers precharge sequence
  */
 void sendPrechargeRequest(void){
-	uint8_t pinState = HAL_GPIO_ReadPin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin);
+	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
 	if (BMS_TYPE == ORION_BMS) {
-		if(pinState == GPIO_PIN_RESET && !prechargeState){
+		if(pinState == GPIO_PIN_SET && !prechargeState){
 			prechargeState = true;
 			millis_precharge = HAL_GetTick();
 		}
-		else if (pinState == GPIO_PIN_SET){
+		else if (pinState == GPIO_PIN_RESET){
 			prechargeState = false;
 		}
 		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
 			prechargeSequence();
+			prechargeFinished = true;
 		}
 	} else if (BMS_TYPE == CUSTOM_BMS) {
 		while (1) {}
@@ -459,7 +461,7 @@ uint8_t prechargeSequence(void){
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 
 
-	  while (startPrechargeTime - HAL_GetTick() < PRECHARGE_TIMEOUT_MS) { //loop for 4
+	  while (HAL_GetTick() - startPrechargeTime < PRECHARGE_TIMEOUT_MS) { //loop for 4
 
 		  //get inverter & BMS can data
 		  if (CANSPI_Receive(&rxMessage)) {
@@ -541,7 +543,7 @@ void lookForRTD(void) {
 			readFromCAN();
 		}
 
-		if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT && dma_read_complete){
+		if(dma_read_complete){
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
@@ -549,7 +551,7 @@ void lookForRTD(void) {
 
 		//add check for make sure apps are 0 travel
 
-		while(!prechargeState){
+		while(!prechargeFinished){
 //			checkAPPSPlausibility();
 //			checkCrossCheck();
 			sendPrechargeRequest();
@@ -615,7 +617,7 @@ int main(void)
 	}
 
 	// Initialize some diagnostics values
-	bms_diagnostics.inverterActive = 1;
+//	bms_diagnostics.inverterActive = 1;
 	inverter_diagnostics.motorRpm   = 1;
 
 
@@ -627,8 +629,7 @@ int main(void)
 	lookForRTD();
 
 	/* DRIVE LOOP */
-	while (1)
-	{
+	while (1) {
 
 //		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 //		txMessage.frame.id = 0b10000000011;
@@ -672,7 +673,7 @@ int main(void)
 			readFromCAN();
 		}
 
-		if(millis_since_dma_read -  HAL_GetTick() > DMA_READ_TIMEOUT && dma_read_complete){
+		if(dma_read_complete){
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
@@ -687,7 +688,7 @@ int main(void)
 		checkAPPSPlausibility();
 		checkCrossCheck();
 
-//		checkShutdown();  // If pin is high, torque->0, block
+		checkShutdown();  // If pin is high, torque->0, block
 
 		finalTorqueRequest   = requestedTorque;
 		lastRequestedTorque  = requestedTorque;
@@ -792,7 +793,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_14;
   sConfig.Rank = 2;
-  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -975,6 +976,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, LED1_Pin|PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin, GPIO_PIN_RESET);
@@ -1030,11 +1032,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PRECHARGE_BTN_Pin SHUTDOWN_Pin */
-  GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin|SHUTDOWN_Pin;
+  /*Configure GPIO pin : PRECHARGE_BTN_Pin */
+  GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(PRECHARGE_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN2_CS_Pin */
   GPIO_InitStruct.Pin = CAN2_CS_Pin;
@@ -1042,6 +1044,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SHUTDOWN_Pin */
+  GPIO_InitStruct.Pin = SHUTDOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
