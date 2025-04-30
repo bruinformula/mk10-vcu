@@ -91,6 +91,11 @@ volatile uint32_t apps1Value = 0;
 volatile uint32_t apps2Value = 0;
 volatile uint32_t bseValue = 0;
 
+uint32_t apps1Buffer[ADC_READ_BUFFER] = {0};
+uint32_t apps2Buffer[ADC_READ_BUFFER] = {0};
+uint32_t bseBuffer[ADC_READ_BUFFER]   = {0};
+uint8_t adcBufferIndex = 0;
+
 float requestedTorque;
 float lastRequestedTorque = 0;
 float finalTorqueRequest;
@@ -169,6 +174,17 @@ void lookForRTD(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+int compare_uint32_t(const void *a, const void *b) {
+    return (*(uint32_t*)a - *(uint32_t*)b);
+}
+
+uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
+    uint32_t temp[ADC_READ_BUFFER];
+    memcpy(temp, buffer, size * sizeof(uint32_t));
+    qsort(temp, size, sizeof(uint32_t), compare_uint32_t);
+    return temp[size / 2];
+}
+
 /**
  * @brief Repeatedly check the shutdown pin; if high, set torque to 0 and block forever.
  */
@@ -242,14 +258,22 @@ void updateInverterVolts(void) {
  * @brief ADC Conversion Complete callback. Copies the DMA buffer into apps/bse values.
  */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
-	// Because DMAContinuousRequests is enabled and triggered by TIM3,
-	// this will be called repeatedly on each conversion sequence.
-	apps1Value = ADC_Reads[APPS1_RANK-1];
-	apps2Value = ADC_Reads[APPS2_RANK-1];
-	bseValue   = ADC_Reads[BSE_RANK-1];
-	dma_read_complete = 1;
+    // Store latest samples into buffers
+    apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
+    apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
+    bseBuffer[adcBufferIndex]   = ADC_Reads[BSE_RANK-1];
 
+    // Move buffer index circularly
+    adcBufferIndex = (adcBufferIndex + 1) % ADC_READ_BUFFER;
+
+    // Compute and assign median
+    apps1Value = median_uint32_t(apps1Buffer, ADC_READ_BUFFER);
+    apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
+    bseValue   = median_uint32_t(bseBuffer, ADC_READ_BUFFER);
+
+    dma_read_complete = 1;
 }
+
 
 /**
  * @brief Calculate the requested torque based on APPS and RPM, or regen based on BSE.
