@@ -212,11 +212,11 @@ void readFromCAN() {
  */
 void updateBMSDiagnostics(void) {
 	// Pack_Current (signed 16-bit at bit 8, factor 0.1)
-	int16_t pack_current_raw = (int16_t)((rxMessage.frame.data1 << 8) | rxMessage.frame.data0);  // Little-endian
+	int16_t pack_current_raw = (int16_t)((rxMessage.frame.data0 << 8) | rxMessage.frame.data1);  // Little-endian
 	float pack_current = pack_current_raw * 0.1f;
 
 	// Pack_Inst_Voltage (unsigned 16-bit at bit 24, factor 0.1)
-	uint16_t pack_voltage_raw = (rxMessage.frame.data3 << 8) | rxMessage.frame.data2;
+	uint16_t pack_voltage_raw = (rxMessage.frame.data2 << 8) | rxMessage.frame.data3;
 	float pack_voltage = pack_voltage_raw * 0.1f;
 
 	// Is_Ready_State (bit 54)
@@ -386,14 +386,14 @@ void sendTorqueCommand(void) {
 	txMessage.frame.data0 = msg0;
 	txMessage.frame.data1 = msg1;
 	txMessage.frame.data2 = 0;
-	txMessage.frame.data3 = 0;
-	txMessage.frame.data4 = 1;
+	txMessage.frame.data3 = 0; //forward?
+	txMessage.frame.data4 = 0x80;
 
 	//lockout
 	if(beginTorqueRequests){
-		txMessage.frame.data5 = 0;
+		txMessage.frame.data5 = 0x80;
 	}else{
-		txMessage.frame.data5 = 1;
+		txMessage.frame.data5 = 0;
 	}
 	txMessage.frame.data6 = 0;
 	txMessage.frame.data7 = 0;
@@ -453,31 +453,42 @@ void sendPrechargeRequest(void){
  *
  *@return returns 1 if precharge successful, infinite loop if it doesn't work
  */
+uint32_t startPrechargeTime = 0;
+uint32_t penis = 0;
 uint8_t prechargeSequence(void){
-	uint32_t startPrechargeTime = HAL_GetTick();
+	 startPrechargeTime = HAL_GetTick();
+
+	 HAL_Delay(10);
 
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 	  HAL_Delay(3);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+//	  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 
 
-	  while (HAL_GetTick() - startPrechargeTime < PRECHARGE_TIMEOUT_MS) { //loop for 4
+
+
+	  penis = HAL_GetTick() - startPrechargeTime;
+	  while (penis < PRECHARGE_TIMEOUT_MS && HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) == GPIO_PIN_SET) { //loop for 4
 
 		  //get inverter & BMS can data
 		  if (CANSPI_Receive(&rxMessage)) {
 			  readFromCAN();
 		  }
 
-		  if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts > PRECHARGE_VOLTAGE_DIFF) {
+		  if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts < PRECHARGE_VOLTAGE_DIFF) {
 
 			  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //step 4
 			  HAL_Delay(5);
 			  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
 			  return 1;
 		  }
+
+		  penis = HAL_GetTick() - startPrechargeTime;
 	  }
 
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+	  HAL_Delay(5);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
 	  while (1) {
 
@@ -551,9 +562,17 @@ void lookForRTD(void) {
 
 		//add check for make sure apps are 0 travel
 
+		while (HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) == GPIO_PIN_RESET) {
+		  HAL_Delay(1);
+	  }
+
 		while(!prechargeFinished){
 //			checkAPPSPlausibility();
 //			checkCrossCheck();
+			if (CANSPI_Receive(&rxMessage)) {
+				readFromCAN();
+			}
+
 			sendPrechargeRequest();
 		}
 		// If the driver is ready to drive, send torque over CAN
@@ -579,9 +598,11 @@ void lookForRTD(void) {
   * @retval int
   */
 int main(void)
-{
+ {
 
   /* USER CODE BEGIN 1 */
+
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -620,6 +641,18 @@ int main(void)
 //	bms_diagnostics.inverterActive = 1;
 	inverter_diagnostics.motorRpm   = 1;
 
+	/* TEST RELAYS. COMMENT OUT BEFORE RUNNING */
+//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+//
+//	HAL_Delay(3000);
+//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+//
+//	HAL_Delay(3000);
+//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+//	while(1) {};
 
   /* USER CODE END 2 */
 
