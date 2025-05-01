@@ -383,15 +383,15 @@ void sendTorqueCommand(void) {
 	txMessage.frame.id = 0x0C0;
 	txMessage.frame.dlc = 8;
 
-	txMessage.frame.data0 = msg0;
+	txMessage.frame.data0 = msg0; //torque request
 	txMessage.frame.data1 = msg1;
-	txMessage.frame.data2 = 0;
-	txMessage.frame.data3 = 0; //forward?
-	txMessage.frame.data4 = 0x80;
+	txMessage.frame.data2 = 0; // speed request (only maters in speed mode)
+	txMessage.frame.data3 = 0;
+	txMessage.frame.data4 = 1; //direction
 
 	//lockout
 	if(beginTorqueRequests){
-		txMessage.frame.data5 = 0x80;
+		txMessage.frame.data5 = 1; //
 	}else{
 		txMessage.frame.data5 = 0;
 	}
@@ -583,6 +583,25 @@ void lookForRTD(void) {
 			if(!prevReadyToDrive){
 				beginTorqueRequests = true;
 				PlayStartupSoundOnce();
+
+				//send disable message, maybe this'll let lockout go away
+				for (int erectiledysfunction = 0; erectiledysfunction < 3; erectiledysfunction++) {
+					txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+					txMessage.frame.id = 0x0C0;
+					txMessage.frame.dlc = 8;
+					txMessage.frame.data0 = 0;
+					txMessage.frame.data1 = 0;
+					txMessage.frame.data2 = 0;
+					txMessage.frame.data3 = 0;
+					txMessage.frame.data4 = 0;
+					txMessage.frame.data5 = 0;
+					txMessage.frame.data6 = 0;
+					txMessage.frame.data7 = 0;
+					CANSPI_Transmit(&txMessage);
+
+					HAL_Delay(100);
+				}
+
 			} else {
 				beginTorqueRequests = false;
 			}
@@ -675,7 +694,7 @@ int main(void)
 //		txMessage.frame.data5 = 0x6C;
 //		txMessage.frame.data6 = 0x65;
 //		txMessage.frame.data7 = 0x73;
-//		CANSPI_Trans	mit(&txMessage);
+//		CANSPI_Transmit(&txMessage);
 //
 //		HAL_Delay(100);
 //
