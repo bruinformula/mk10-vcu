@@ -63,6 +63,7 @@ const int PRECHARGE_TIMEOUT_MS = 5000;
 const int PRECHARGE_VOLTAGE_DIFF = 20; //volts off from the pack voltage that is acceptable to finish precharge
 
 
+
 const uint16_t RTD_BUTTON_PRESS_MILLIS = 100;
 const uint16_t PRECHARGE_BUTTON_PRESS_MILLIS = 1000;
 
@@ -72,4 +73,7 @@ const uint16_t PRECHARGE_BUTTON_PRESS_MILLIS = 1000;
 #define ORION_BMS 1
 
 #define ADC_BUFFER 3
+
+#define ADC_READ_BUFFER 5
+
 #endif /* INC_CONSTANTS_H_ */
