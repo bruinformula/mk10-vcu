@@ -2,6 +2,7 @@
 #define CAN_H_
 
 #include <stdint.h>
+#include "CANSPI.h";
 
 
 typedef unsigned char __u8;

@@ -31,7 +31,9 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "can.h"
+#include "pedalProcessing.h"
+#include "safety.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
