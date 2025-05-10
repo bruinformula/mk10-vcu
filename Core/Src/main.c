@@ -357,8 +357,8 @@ void calculateTorqueRequest(void)
  	if(appsValue >= 0){ //apps travel is in range for forward torque
  		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
 
- 		if (requestedTorque >= 94) {
- 			requestedTorque = 94;
+ 		if (requestedTorque >= 50) {
+ 			requestedTorque = 50;
  		}
  	} else { //apps travel is in range for reverse torque
  		if (inverter_diagnostics.carSpeed < 5.0f) {

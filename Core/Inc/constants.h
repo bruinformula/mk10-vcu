@@ -20,12 +20,12 @@ const uint16_t APPS_2_ADC_MAX_VAL = 4096;
 
 //Nm
 const float MIN_TORQUE = 0;
-const float MAX_TORQUE = 108;
+const float MAX_TORQUE = 50;
 
 const float REGEN_BASELINE_TORQUE = 0;
-const float REGEN_MAX_TORQUE = -30;
+const float REGEN_MAX_TORQUE = -15;
 
-const float MAX_RPM = 12000;
+const float MAX_RPM = 5000;
 
 const uint16_t BSE_ADC_MIN_VAL = 0;
 const uint16_t BSE_ADC_MAX_VAL = 4095;
@@ -60,7 +60,7 @@ const int BMS_DIAGNOSTICS_ID = 0x6B0;
 const int PRECHARGE_REQUEST_ID = 0x000;
 
 const int PRECHARGE_TIMEOUT_MS = 7000;
-const int PRECHARGE_VOLTAGE_DIFF = 10; //volts off from the pack voltage that is acceptable to finish precharge
+const int PRECHARGE_VOLTAGE_DIFF = 25; //volts off from the pack voltage that is acceptable to finish precharge
 
 
 
