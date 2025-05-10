@@ -59,6 +59,7 @@ typedef struct {
 typedef struct {
 	int motorRpm;
 	int inverterDCVolts;
+	float carSpeed;
 	// Add more fields as needed
 } InverterDiagnostics;  // The type alias is InverterDiagnostics
 /* USER CODE END PTD */
@@ -82,6 +83,7 @@ DMA_HandleTypeDef hdma_spi2_tx;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
 uCAN_MSG txMessage;
@@ -148,9 +150,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM3_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_I2S2_Init(void);
+static void MX_TIM4_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 // VCU method declarations
@@ -207,6 +210,7 @@ void checkShutdown(){
 		prechargeFinished = false;
 		cpockandballs = 0;
 
+		HAL_Delay(5000);
 
 		lookForRTD();
 	}
@@ -216,8 +220,8 @@ void checkShutdown(){
 // * @brief Update Inverter RPM reading from the last received CAN message.
  */
 void updateRpm() {
-	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2
-			| (rxMessage.frame.data3 << 8));
+	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2 | (rxMessage.frame.data3 << 8));
+	inverter_diagnostics.carSpeed = ((float)(inverter_diagnostics.motorRpm) * 59.0f * 32.0f * 3.14159f * 60.0f) / (12.0f * 39370.1f);
 }
 
 /**
@@ -257,8 +261,11 @@ void updateBMSDiagnostics(void) {
 	bms_diagnostics.packVoltage    = (int)pack_voltage;
 }
 
+
+
+
 /**
- * @brief Parse BMS diagnostics from a received CAN message
+ * @brief Parse inverter diagnostics from a received CAN message
  */
 void updateInverterVolts(void) {
 	// DC volts (signed 16-bit at bit 8, factor 0.1)
@@ -347,11 +354,19 @@ void calculateTorqueRequest(void)
  	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
  	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
  	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
- 	if(appsValue >= 0){
+ 	if(appsValue >= 0){ //apps travel is in range for forward torque
  		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
- 	}else{
- 		float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
- 		requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+
+ 		if (requestedTorque >= 94) {
+ 			requestedTorque = 94;
+ 		}
+ 	} else { //apps travel is in range for reverse torque
+ 		if (inverter_diagnostics.carSpeed < 5.0f) {
+ 			requestedTorque = 0;
+ 		} else {
+			float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+			requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+ 		}
  	}
  }
 
@@ -371,8 +386,7 @@ void checkAPPSPlausibility(void) {
 		apps_plausible = 0; // false
 		requestedTorque = 0;
 	}
-	else if (!apps_plausible
-			&& (HAL_GetTick() - millis_since_apps_implausible < APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+	else if (!apps_plausible && (HAL_GetTick() - millis_since_apps_implausible < APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
 		requestedTorque = 0;
 	}
 	else {
@@ -411,11 +425,18 @@ void checkCrossCheck(void) {
  * @brief Send the torque command message over CAN.
  */
 void sendTorqueCommand(void) {
+
+	if (requestedTorque >= 94) {
+		requestedTorque = 94;
+	}
+
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
 	char msg0 = torqueValue & 0xFF;
 	char msg1 = (torqueValue >> 8) & 0xFF;
+
+
 
 	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	txMessage.frame.id = 0x0C0;
@@ -458,24 +479,32 @@ void checkReadyToDrive(void) {
 }
 
 /**
- * @brief If a hardware pin requests precharge, triggers precharge sequence
+ * @brief If a hardware pin requests pre-charge, triggers pre-charge sequence
  */
 void sendPrechargeRequest(void){
-	uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
-	if (BMS_TYPE == ORION_BMS) {
-		if(pinState == GPIO_PIN_SET && !prechargeState){
-			prechargeState = true;
-			millis_precharge = HAL_GetTick();
+
+	while(!prechargeFinished){
+		//			checkAPPSPlausibility();
+		//			checkCrossCheck();
+		if (CANSPI_Receive(&rxMessage)) {
+			readFromCAN();
 		}
-		else if (pinState == GPIO_PIN_RESET){
-			prechargeState = false;
+		uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
+		if (BMS_TYPE == ORION_BMS) {
+			if(pinState == GPIO_PIN_SET && !prechargeState){
+				prechargeState = true;
+				millis_precharge = HAL_GetTick();
+			}
+			else if (pinState == GPIO_PIN_RESET){
+				prechargeState = false;
+			}
+			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+				prechargeSequence();
+				prechargeFinished = true;
+			}
+		} else if (BMS_TYPE == CUSTOM_BMS) {
+			while (1) {}
 		}
-		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-			prechargeSequence();
-			prechargeFinished = true;
-		}
-	} else if (BMS_TYPE == CUSTOM_BMS) {
-		while (1) {}
 	}
 }
 
@@ -519,6 +548,7 @@ uint8_t prechargeSequence(void){
 			  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //step 4
 			  HAL_Delay(5);
 			  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+			  prechargeFinished = true;
 			  return 1;
 		  }
 
@@ -580,6 +610,7 @@ void PlayStartupSoundOnce(void) {
 
 uint8_t rtdoverride = 0;
 
+GPIO_PinState ballsandcock;
 void lookForRTD(void) {
 	if (rtdoverride == 1) {
 		beginTorqueRequests = true;
@@ -599,19 +630,14 @@ void lookForRTD(void) {
 		}
 
 		//add check for make sure apps are 0 travel
+		ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+//		while (ballsandcock == GPIO_PIN_RESET) {
+//		  HAL_Delay(1);
+//	  }
 
-		while (HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) == GPIO_PIN_RESET) {
-		  HAL_Delay(1);
-	  }
 
-		while(!prechargeFinished){
-//			checkAPPSPlausibility();
-//			checkCrossCheck();
-			if (CANSPI_Receive(&rxMessage)) {
-				readFromCAN();
-			}
-			sendPrechargeRequest();
-		}
+
+		sendPrechargeRequest();
 		// If the driver is ready to drive, send torque over CAN
 		uint8_t prevReadyToDrive = readyToDrive;
 		checkReadyToDrive();
@@ -649,6 +675,8 @@ void lookForRTD(void) {
 	}
 }
 
+//global debug variable
+GPIO_PinState penispenispenis;
 /* USER CODE END 0 */
 
 /**
@@ -683,12 +711,23 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
-  MX_TIM3_Init();
   MX_SPI3_Init();
   MX_I2S2_Init();
+  MX_TIM4_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-	// Start TIM3
-	HAL_TIM_Base_Start(&htim3);
+	// Start TIM4
+//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
+  //start tim3 for dma reads
+  HAL_TIM_Base_Start(&htim3);
+//  while(1) {
+//	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+//	  HAL_Delay(500);
+//	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+//	  HAL_Delay(500);
+//
+//  }
+
 
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
 	if (CANSPI_Initialize() != true) {
@@ -716,6 +755,17 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+//	while (1) {
+//		if(dma_read_complete){
+//			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+//			dma_read_complete = 0;
+//			millis_since_dma_read = HAL_GetTick();
+//		}
+//	}
+//	while(1) {
+//
+//	}
 	/* initial bootup look for RTD */
 	lookForRTD();
 
@@ -1031,6 +1081,55 @@ static void MX_TIM3_Init(void)
 }
 
 /**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 3360;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 255;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 127;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+  HAL_TIM_MspPostInit(&htim4);
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -1079,6 +1178,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : LED1_Pin PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
@@ -1116,6 +1218,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RTD_BTN_Pin PB5 */
   GPIO_InitStruct.Pin = RTD_BTN_Pin|GPIO_PIN_5;

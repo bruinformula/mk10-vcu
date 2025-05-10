@@ -59,8 +59,8 @@ const int INVERTER_VOLTAGE_READ_ID = 0x0A7;
 const int BMS_DIAGNOSTICS_ID = 0x6B0;
 const int PRECHARGE_REQUEST_ID = 0x000;
 
-const int PRECHARGE_TIMEOUT_MS = 5000;
-const int PRECHARGE_VOLTAGE_DIFF = 20; //volts off from the pack voltage that is acceptable to finish precharge
+const int PRECHARGE_TIMEOUT_MS = 7000;
+const int PRECHARGE_VOLTAGE_DIFF = 10; //volts off from the pack voltage that is acceptable to finish precharge
 
 
 
