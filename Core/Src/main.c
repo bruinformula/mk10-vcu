@@ -88,6 +88,8 @@ TIM_HandleTypeDef htim4;
 /* USER CODE BEGIN PV */
 uCAN_MSG txMessage;
 uCAN_MSG rxMessage;
+uCAN_MSG diagMessage;
+
 
 volatile uint32_t apps1Value = 0;
 volatile uint32_t apps2Value = 0;
@@ -117,9 +119,9 @@ uint16_t cross_check_plausible = true;
 uint32_t ADC_Reads[ADC_BUFFER];
 
 // Temp variables for display or logic
-float apps1_as_percent;
-float apps2_as_percent;
-float bse_as_percent;
+float apps1_as_percent = 0;
+float apps2_as_percent = 0;
+float bse_as_percent = 0;
 
 // BSE / brake pressed logic
 uint8_t readyToDrive = false;
@@ -193,7 +195,10 @@ uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
  */
 void checkShutdown(){
 	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+//	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00111110;
+	sendDiagMsg();
 	if (pinState == GPIO_PIN_RESET) {
+
 		requestedTorque = 0;
 		sendTorqueCommand();
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
@@ -210,6 +215,9 @@ void checkShutdown(){
 		prechargeFinished = false;
 		cpockandballs = 0;
 
+		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
+		sendDiagMsg();
+
 		HAL_Delay(5000);
 
 		lookForRTD();
@@ -221,7 +229,7 @@ void checkShutdown(){
  */
 void updateRpm() {
 	inverter_diagnostics.motorRpm = (float) (rxMessage.frame.data2 | (rxMessage.frame.data3 << 8));
-	inverter_diagnostics.carSpeed = ((float)(inverter_diagnostics.motorRpm) * 59.0f * 32.0f * 3.14159f * 60.0f) / (12.0f * 39370.1f);
+	inverter_diagnostics.carSpeed = (float)(inverter_diagnostics.motorRpm) * RPM_TO_CARSPEED_CONVFACTOR;
 }
 
 /**
@@ -460,6 +468,43 @@ void sendTorqueCommand(void) {
 	CANSPI_Transmit(&txMessage);
 }
 
+void sendDiagMsg(void) {
+
+
+
+
+	char msg0 = ((int)(inverter_diagnostics.carSpeed * 100) ) & 0xff;
+	char msg1 = (((int)(inverter_diagnostics.carSpeed * 100) ) >> 8) & 0xff;
+
+	diagMessage.frame.data0 = msg0; //feedback speed
+	diagMessage.frame.data1 = msg1;
+
+
+	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
+
+	// Break the torqueValue into two bytes (little-endian)
+	msg0 = torqueValue & 0xFF;
+	msg1 = (torqueValue >> 8) & 0xFF;
+	diagMessage.frame.data2 = msg0; // torque request
+	diagMessage.frame.data3 = msg1;
+	diagMessage.frame.data4 = (int)(apps1_as_percent); //apps1%
+
+
+	diagMessage.frame.data5 = (int)(apps2_as_percent);
+	diagMessage.frame.data6 = bse_as_percent;
+
+
+	diagMessage.frame.data7 = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) << 1;
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
+	diagMessage.frame.data7 = diagMessage.frame.data7 << 3; //will set accy relay states as i go
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | cross_check_plausible) << 1;
+
+
+
+	CANSPI_Transmit(&diagMessage);
+}
+
 /**
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
  */
@@ -486,6 +531,7 @@ void sendPrechargeRequest(void){
 	while(!prechargeFinished){
 		//			checkAPPSPlausibility();
 		//			checkCrossCheck();
+		sendDiagMsg();
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
@@ -527,10 +573,13 @@ uint8_t prechargeSequence(void){
 
 	 HAL_Delay(10);
 
+	 diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00110000;
+	sendDiagMsg();
+
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 	  HAL_Delay(3);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
-//	  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+	  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 
 
 
@@ -549,18 +598,22 @@ uint8_t prechargeSequence(void){
 			  HAL_Delay(5);
 			  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
 			  prechargeFinished = true;
+
+			  diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00011000;
+			  	sendDiagMsg();
 			  return 1;
 		  }
 
 		  penis = HAL_GetTick() - startPrechargeTime;
+		  sendDiagMsg();
 	  }
 
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
 	  HAL_Delay(5);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
-	  while (1) {
-
-	  }
+	  diagMessage.frame.data7 = diagMessage.frame.data7 | 0b11000111;
+	sendDiagMsg();
+	  HAL_Delay(5000);
 
 	//fill this in pls justin
 }
@@ -617,7 +670,10 @@ void lookForRTD(void) {
 		PlayStartupSoundOnce();
 		return;
 	}
+	diagMessage.frame.data7 = diagMessage.frame.data7 | 1;
 	while(!readyToDrive) {
+
+
 
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
@@ -648,6 +704,8 @@ void lookForRTD(void) {
 			if(!prevReadyToDrive){
 				beginTorqueRequests = true;
 				PlayStartupSoundOnce();
+				diagMessage.frame.data7 = diagMessage.frame.data7 | 0x10000000;
+				diagMessage.frame.data7 = diagMessage.frame.data7 & 0x11111110;
 
 				//send disable message, maybe this'll let lockout go away
 				for (int erectiledysfunction = 0; erectiledysfunction < 3; erectiledysfunction++) {
@@ -672,6 +730,7 @@ void lookForRTD(void) {
 			}
 
 		}
+		sendDiagMsg();
 	}
 }
 
@@ -737,6 +796,18 @@ int main(void)
 	// Initialize some diagnostics values
 //	bms_diagnostics.inverterActive = 1;
 	inverter_diagnostics.motorRpm   = 1;
+
+	diagMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	diagMessage.frame.id = 0x500;
+	diagMessage.frame.dlc = 8;
+	txMessage.frame.data0 = 0x00;
+	txMessage.frame.data1 = 0x00;
+	txMessage.frame.data2 = 0x00;
+	txMessage.frame.data3 = 0x00;
+	txMessage.frame.data4 = 0x00;
+	txMessage.frame.data5 = 0x00;
+	txMessage.frame.data6 = 0x00;
+	txMessage.frame.data7 = 0x00;
 
 	/* TEST RELAYS. COMMENT OUT BEFORE RUNNING */
 //	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
@@ -814,6 +885,7 @@ int main(void)
 			readFromCAN();
 		}
 
+
 		if(dma_read_complete){
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
@@ -837,6 +909,8 @@ int main(void)
 
 
 		if (readyToDrive || rtdoverride == 1) sendTorqueCommand();
+
+		sendDiagMsg();
 		// ... do other tasks as needed ...
 	}
     /* USER CODE END WHILE */

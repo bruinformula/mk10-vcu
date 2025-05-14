@@ -76,4 +76,6 @@ const uint16_t PRECHARGE_BUTTON_PRESS_MILLIS = 1000;
 
 #define ADC_READ_BUFFER 5
 
+#define RPM_TO_CARSPEED_CONVFACTOR (59.0f * 32.0f * 3.14159f * 60.0f) / (12.0f * 39370.1f)
+
 #endif /* INC_CONSTANTS_H_ */
