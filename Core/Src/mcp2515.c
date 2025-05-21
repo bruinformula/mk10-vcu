@@ -24,12 +24,12 @@
 #include "gpio.h"
 
 /* SPI related variables */
-extern SPI_HandleTypeDef hspi3;
-#define SPI_CAN      (&hspi3)
-#define SPI_TIMEOUT  10
 
-#define MCP2515_CS_HIGH()   HAL_GPIO_WritePin(CAN_CS_GPIO_Port, CAN_CS_Pin, GPIO_PIN_SET)
-#define MCP2515_CS_LOW()    HAL_GPIO_WritePin(CAN_CS_GPIO_Port, CAN_CS_Pin, GPIO_PIN_RESET); HAL_Delay(1)
+extern SPI_HandleTypeDef        hspi3;
+#define SPI_CAN                 &hspi3
+#define SPI_TIMEOUT             10
+#define MCP2515_CS_HIGH()   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET)
+#define MCP2515_CS_LOW()    HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_RESET); HAL_Delay(1);
 
 /* Prototypes for private SPI helpers */
 static void    SPI_Tx(uint8_t data);

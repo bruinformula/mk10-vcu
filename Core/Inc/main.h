@@ -49,6 +49,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -57,8 +59,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define RTD_Pin GPIO_PIN_13
-#define RTD_GPIO_Port GPIOC
 #define LED1_Pin GPIO_PIN_0
 #define LED1_GPIO_Port GPIOC
 #define CAN_CS_Pin GPIO_PIN_1
@@ -69,16 +69,24 @@ void Error_Handler(void);
 #define CAN2_RESET_GPIO_Port GPIOC
 #define LED2_Pin GPIO_PIN_5
 #define LED2_GPIO_Port GPIOA
-#define PRECHARGE_Pin GPIO_PIN_7
-#define PRECHARGE_GPIO_Port GPIOC
-#define SHUTDOWN_Pin GPIO_PIN_9
-#define SHUTDOWN_GPIO_Port GPIOA
+#define RTD_BTN_Pin GPIO_PIN_2
+#define RTD_BTN_GPIO_Port GPIOB
+#define PCHG_RLY_CTRL_Pin GPIO_PIN_7
+#define PCHG_RLY_CTRL_GPIO_Port GPIOC
+#define AIR_P_CTRL_Pin GPIO_PIN_8
+#define AIR_P_CTRL_GPIO_Port GPIOC
+#define AIR_N_CTRL_Pin GPIO_PIN_9
+#define AIR_N_CTRL_GPIO_Port GPIOC
+#define PRECHARGE_BTN_Pin GPIO_PIN_8
+#define PRECHARGE_BTN_GPIO_Port GPIOA
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
 #define CAN2_CS_Pin GPIO_PIN_15
 #define CAN2_CS_GPIO_Port GPIOA
+#define SHUTDOWN_Pin GPIO_PIN_2
+#define SHUTDOWN_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 
