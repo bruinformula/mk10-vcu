@@ -89,6 +89,8 @@ TIM_HandleTypeDef htim4;
 uCAN_MSG txMessage;
 uCAN_MSG rxMessage;
 uCAN_MSG diagMessage;
+uCAN_MSG fanMessage;
+
 
 
 volatile uint32_t apps1Value = 0;
@@ -200,7 +202,9 @@ void checkShutdown(){
 	if (pinState == GPIO_PIN_RESET) {
 
 		requestedTorque = 0;
+
 		sendTorqueCommand();
+		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 		HAL_Delay(5);
 		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
@@ -215,12 +219,26 @@ void checkShutdown(){
 		prechargeFinished = false;
 		cpockandballs = 0;
 
+		for (int i = 0; i < 3; i++) {
+			txMessage.frame.id = 0x0C0;
+			txMessage.frame.dlc = 8;
+			txMessage.frame.data0 = 0;
+			txMessage.frame.data1 = 0;
+			txMessage.frame.data2 = 0;
+			txMessage.frame.data3 = 0;
+			txMessage.frame.data4 = 0;
+			txMessage.frame.data5 = 0;
+			txMessage.frame.data6 = 0;
+			txMessage.frame.data7 = 0;
+			CANSPI_Transmit(&txMessage);
+		}
+
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
 		sendDiagMsg();
 
 		HAL_Delay(5000);
 
-		lookForRTD();
+//		lookForRTD();
 	}
 }
 
@@ -365,8 +383,8 @@ void calculateTorqueRequest(void)
  	if(appsValue >= 0){ //apps travel is in range for forward torque
  		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
 
- 		if (requestedTorque >= 50) {
- 			requestedTorque = 50;
+ 		if (requestedTorque >= MAX_TORQUE) {
+ 			requestedTorque = MAX_TORQUE;
  		}
  	} else { //apps travel is in range for reverse torque
  		if (inverter_diagnostics.carSpeed < 5.0f) {
@@ -458,7 +476,7 @@ void sendTorqueCommand(void) {
 
 	//lockout
 	if(beginTorqueRequests){
-		txMessage.frame.data5 = 1; //
+		txMessage.frame.data5 = 1;
 	}else{
 		txMessage.frame.data5 = 0;
 	}
@@ -501,6 +519,26 @@ void sendDiagMsg(void) {
 	diagMessage.frame.data7 = (diagMessage.frame.data7 | cross_check_plausible) << 1;
 
 
+
+	CANSPI_Transmit(&diagMessage);
+}
+
+void sendFanCommand(void) {
+
+
+
+
+
+	fanMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	fanMessage.frame.id = 0x501;
+	fanMessage.frame.dlc = 2;
+	if (readyToDrive) {
+		fanMessage.frame.data0 = 0xFF;
+		fanMessage.frame.data1 = 0xFF;
+	} else {
+		fanMessage.frame.data0 = 0x00;
+		fanMessage.frame.data1 = 0x00;
+	}
 
 	CANSPI_Transmit(&diagMessage);
 }
@@ -600,7 +638,7 @@ uint8_t prechargeSequence(void){
 			  prechargeFinished = true;
 
 			  diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00011000;
-			  	sendDiagMsg();
+			  sendDiagMsg();
 			  return 1;
 		  }
 
@@ -611,9 +649,14 @@ uint8_t prechargeSequence(void){
 	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
 	  HAL_Delay(5);
 	  HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
-	  diagMessage.frame.data7 = diagMessage.frame.data7 | 0b11000111;
-	sendDiagMsg();
+	  HAL_Delay(5);
+	  HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET);
+	  diagMessage.frame.data7 = diagMessage.frame.data7 & 0b11000111;
+	  sendDiagMsg();
 	  HAL_Delay(5000);
+	  prechargeState = false;
+	  prechargeFinished = false;
+	 return 0;
 
 	//fill this in pls justin
 }
@@ -694,6 +737,7 @@ void lookForRTD(void) {
 
 
 		sendPrechargeRequest();
+
 		// If the driver is ready to drive, send torque over CAN
 		uint8_t prevReadyToDrive = readyToDrive;
 		checkReadyToDrive();
@@ -800,14 +844,14 @@ int main(void)
 	diagMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	diagMessage.frame.id = 0x500;
 	diagMessage.frame.dlc = 8;
-	txMessage.frame.data0 = 0x00;
-	txMessage.frame.data1 = 0x00;
-	txMessage.frame.data2 = 0x00;
-	txMessage.frame.data3 = 0x00;
-	txMessage.frame.data4 = 0x00;
-	txMessage.frame.data5 = 0x00;
-	txMessage.frame.data6 = 0x00;
-	txMessage.frame.data7 = 0x00;
+	diagMessage.frame.data0 = 0x00;
+	diagMessage.frame.data1 = 0x00;
+	diagMessage.frame.data2 = 0x00;
+	diagMessage.frame.data3 = 0x00;
+	diagMessage.frame.data4 = 0x00;
+	diagMessage.frame.data5 = 0x00;
+	diagMessage.frame.data6 = 0x00;
+	diagMessage.frame.data7 = 0x00;
 
 	/* TEST RELAYS. COMMENT OUT BEFORE RUNNING */
 //	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
@@ -837,8 +881,7 @@ int main(void)
 //	while(1) {
 //
 //	}
-	/* initial bootup look for RTD */
-	lookForRTD();
+
 
 	/* DRIVE LOOP */
 	while (1) {
@@ -879,6 +922,10 @@ int main(void)
 //			CANSPI_Transmit(&ppMesage);
 //
 //		}
+
+		if (!readyToDrive) {
+			lookForRTD();
+		}
 //
 		// Check for new CAN data
 		if (CANSPI_Receive(&rxMessage)) {
@@ -908,7 +955,10 @@ int main(void)
 
 
 
-		if (readyToDrive || rtdoverride == 1) sendTorqueCommand();
+		if (readyToDrive || rtdoverride == 1) {
+			sendTorqueCommand();
+			sendFanCommand();
+		}
 
 		sendDiagMsg();
 		// ... do other tasks as needed ...

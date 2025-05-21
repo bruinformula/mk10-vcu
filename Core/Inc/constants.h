@@ -23,12 +23,12 @@ const float MIN_TORQUE = 0;
 const float MAX_TORQUE = 50;
 
 const float REGEN_BASELINE_TORQUE = 0;
-const float REGEN_MAX_TORQUE = -15;
+const float REGEN_MAX_TORQUE = 0;
 
 const float MAX_RPM = 5000;
 
-const uint16_t BSE_ADC_MIN_VAL = 0;
-const uint16_t BSE_ADC_MAX_VAL = 4095;
+const uint16_t BSE_ADC_MIN_VAL = 410;
+const uint16_t BSE_ADC_MAX_VAL = 3500;
 
 
 const float APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 10;
@@ -59,7 +59,7 @@ const int INVERTER_VOLTAGE_READ_ID = 0x0A7;
 const int BMS_DIAGNOSTICS_ID = 0x6B0;
 const int PRECHARGE_REQUEST_ID = 0x000;
 
-const int PRECHARGE_TIMEOUT_MS = 7000;
+const int PRECHARGE_TIMEOUT_MS = 10000;
 const int PRECHARGE_VOLTAGE_DIFF = 25; //volts off from the pack voltage that is acceptable to finish precharge
 
 
