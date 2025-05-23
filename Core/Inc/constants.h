@@ -19,11 +19,15 @@ const uint16_t APPS_2_ADC_MAX_VAL = 3718;
 const uint16_t APPS_2_ADC_MIN_VAL = 372;
 
 //Nm
-const float MIN_TORQUE = 0;
-const float MAX_TORQUE = 50;
+const float MIN_TORQUE = -10;
+const float MAX_TORQUE = 75;
+//const float MIN_TORQUE = 0;
+//const float MAX_TORQUE = 0;
 
 const float REGEN_BASELINE_TORQUE = 0;
-const float REGEN_MAX_TORQUE = 0;
+const float REGEN_MAX_TORQUE = -30;
+//const float REGEN_BASELINE_TORQUE = 0;
+//const float REGEN_MAX_TORQUE = 0;
 
 const float MAX_RPM = 5000;
 
