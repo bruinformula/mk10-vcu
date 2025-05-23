@@ -8,15 +8,15 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 2;
+const uint16_t APPS1_RANK = 1;
 const uint16_t APPS2_RANK = 2;
 const uint16_t BSE_RANK = 3;
 
-const uint16_t APPS_1_ADC_MIN_VAL = 650;
-const uint16_t APPS_1_ADC_MAX_VAL = 4096;
+const uint16_t APPS_1_ADC_MAX_VAL = 3116;
+const uint16_t APPS_1_ADC_MIN_VAL = 312;
 
-const uint16_t APPS_2_ADC_MIN_VAL = 650;
-const uint16_t APPS_2_ADC_MAX_VAL = 4096;
+const uint16_t APPS_2_ADC_MAX_VAL = 3718;
+const uint16_t APPS_2_ADC_MIN_VAL = 372;
 
 //Nm
 const float MIN_TORQUE = 0;
@@ -27,8 +27,8 @@ const float REGEN_MAX_TORQUE = 0;
 
 const float MAX_RPM = 5000;
 
-const uint16_t BSE_ADC_MIN_VAL = 410;
-const uint16_t BSE_ADC_MAX_VAL = 3500;
+const uint16_t BSE_ADC_MIN_VAL = 371;
+const uint16_t BSE_ADC_MAX_VAL = 4085;
 
 
 const float APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 10;
@@ -64,10 +64,9 @@ const int PRECHARGE_VOLTAGE_DIFF = 25; //volts off from the pack voltage that is
 
 
 
-const uint16_t RTD_BUTTON_PRESS_MILLIS = 100;
+const uint16_t RTD_BUTTON_PRESS_MILLIS = 500;
 const uint16_t PRECHARGE_BUTTON_PRESS_MILLIS = 1000;
 
-//#define INVERTER_WORK_MASK 0x80000000800000000000;
 
 #define CUSTOM_BMS 0
 #define ORION_BMS 1

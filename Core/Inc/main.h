@@ -91,6 +91,10 @@ void Error_Handler(void);
 #define SWO_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+#define DRIVE 0
+#define CALIBRATE_PEDALS 1
+#define UNWELD_AIRS 2
+#define CAN_TEST 3
 
 /* USER CODE END Private defines */
 

@@ -30,6 +30,9 @@
 #include "constants.h"
 #include "mcp2515.h"
 
+const uint8_t VCUMODE = DRIVE;
+
+
 //--- BEGIN WAV PLAYBACK DEFINES ---//
 #include "startup_sound.h"  // Contains 'startup_sound' array and 'startup_sound_len'
 
@@ -175,12 +178,48 @@ void PlayStartupSoundOnce(void);
 void updateInverterVolts(void);
 void lookForRTD(void);
 void AIRUnweldHelper(void);
+
+void calibratePedalsMain(void);
 uint32_t penispenispenis;
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void sendDiagMsg(void) {
+
+	char msg0 = ((int)(inverter_diagnostics.carSpeed * 100) ) & 0xff;
+	char msg1 = (((int)(inverter_diagnostics.carSpeed * 100) ) >> 8) & 0xff;
+
+	diagMessage.frame.data0 = msg0; //feedback speed
+	diagMessage.frame.data1 = msg1;
+
+
+	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
+
+	// Break the torqueValue into two bytes (little-endian)
+	msg0 = torqueValue & 0xFF;
+	msg1 = (torqueValue >> 8) & 0xFF;
+	diagMessage.frame.data2 = msg0; // torque request
+	diagMessage.frame.data3 = msg1;
+	diagMessage.frame.data4 = (int)(apps1_as_percent); //apps1%
+
+
+	diagMessage.frame.data5 = (int)(apps2_as_percent);
+	diagMessage.frame.data6 = bse_as_percent;
+
+
+	diagMessage.frame.data7 = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) << 1;
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
+	diagMessage.frame.data7 = diagMessage.frame.data7 << 3; //will set accy relay states as i go
+	diagMessage.frame.data7 = (diagMessage.frame.data7 | cross_check_plausible) << 1;
+
+
+
+	CANSPI_Transmit(&diagMessage);
+}
 
 int compare_uint32_t(const void *a, const void *b) {
     return (*(uint32_t*)a - *(uint32_t*)b);
@@ -494,42 +533,7 @@ void sendTorqueCommand(void) {
 	CANSPI_Transmit(&txMessage);
 }
 
-void sendDiagMsg(void) {
 
-
-
-
-	char msg0 = ((int)(inverter_diagnostics.carSpeed * 100) ) & 0xff;
-	char msg1 = (((int)(inverter_diagnostics.carSpeed * 100) ) >> 8) & 0xff;
-
-	diagMessage.frame.data0 = msg0; //feedback speed
-	diagMessage.frame.data1 = msg1;
-
-
-	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
-
-	// Break the torqueValue into two bytes (little-endian)
-	msg0 = torqueValue & 0xFF;
-	msg1 = (torqueValue >> 8) & 0xFF;
-	diagMessage.frame.data2 = msg0; // torque request
-	diagMessage.frame.data3 = msg1;
-	diagMessage.frame.data4 = (int)(apps1_as_percent); //apps1%
-
-
-	diagMessage.frame.data5 = (int)(apps2_as_percent);
-	diagMessage.frame.data6 = bse_as_percent;
-
-
-	diagMessage.frame.data7 = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) << 1;
-	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
-	diagMessage.frame.data7 = (diagMessage.frame.data7 | readyToDrive) << 1;
-	diagMessage.frame.data7 = diagMessage.frame.data7 << 3; //will set accy relay states as i go
-	diagMessage.frame.data7 = (diagMessage.frame.data7 | cross_check_plausible) << 1;
-
-
-
-	CANSPI_Transmit(&diagMessage);
-}
 
 void sendFanCommand(void) {
 
@@ -792,7 +796,7 @@ void lookForRTD(void) {
 }
 
 void AIRUnweldHelper(void) {
-	uint8_t flicker_delay = 100;
+	uint16_t flicker_delay = 2000;
 	while(1) {
 		HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 		HAL_Delay(flicker_delay);
@@ -806,6 +810,92 @@ void AIRUnweldHelper(void) {
 		HAL_Delay(flicker_delay);
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 		HAL_Delay(2*flicker_delay);
+	}
+}
+
+typedef struct {
+	uint32_t min;
+	uint32_t max;
+} PedalBounds;
+PedalBounds APPS1Bounds;
+PedalBounds APPS2Bounds;
+PedalBounds BSEBounds;
+
+void calibratePedalsMain(void) {
+	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
+		if(dma_read_complete){
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+			dma_read_complete = 0;
+			millis_since_dma_read = HAL_GetTick();
+		}
+	}
+	APPS1Bounds.min = 4096;
+	APPS1Bounds.max = 0;
+	APPS2Bounds.min = 4096;
+	APPS2Bounds.max = 0;
+	BSEBounds.min = 4096;
+	BSEBounds.max = 0;
+
+
+	while (1) {
+		if(dma_read_complete){
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+			dma_read_complete = 0;
+			millis_since_dma_read = HAL_GetTick();
+		}
+
+		if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
+		else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
+
+		if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
+		else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
+
+		if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
+		else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+
+		calculateTorqueRequest();
+		checkAPPSPlausibility();
+		checkCrossCheck();
+	}
+}
+
+void CANTestHelperMain(void) {
+
+	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	txMessage.frame.id = 0b10000000011;
+	txMessage.frame.dlc = 8;
+	txMessage.frame.data0 = 0x61;
+	txMessage.frame.data1 = 0x73;
+	txMessage.frame.data2 = 0x73;
+	txMessage.frame.data3 = 0x68;
+	txMessage.frame.data4 = 0x6F;
+	txMessage.frame.data5 = 0x6C;
+	txMessage.frame.data6 = 0x65;
+	txMessage.frame.data7 = 0x73;
+	CANSPI_Transmit(&txMessage);
+
+	HAL_Delay(100);
+
+
+	if(CANSPI_Receive(&rxMessage))
+	{
+		uCAN_MSG orangeMessage = rxMessage;
+		uCAN_MSG ppMesage;
+		ppMesage.frame.idType = rxMessage.frame.idType;
+		ppMesage.frame.id = rxMessage.frame.id;
+		ppMesage.frame.dlc = rxMessage.frame.dlc;
+		ppMesage.frame.data0 = rxMessage.frame.data0 | 0xAA;
+		ppMesage.frame.data1 = rxMessage.frame.data1 | 0xAA;
+		ppMesage.frame.data2 = rxMessage.frame.data2 | 0xAA;
+		ppMesage.frame.data3 = rxMessage.frame.data3 | 0xAA;
+		ppMesage.frame.data4 = rxMessage.frame.data4 | 0xAA;
+		ppMesage.frame.data5 = rxMessage.frame.data5 | 0xAA;
+		ppMesage.frame.data6 = rxMessage.frame.data6 | 0xAA;
+		ppMesage.frame.data7 = rxMessage.frame.data7 | 0xAA;
+		uCAN_MSG ppMessage2 = ppMesage;
+
+		CANSPI_Transmit(&ppMesage);
+
 	}
 }
 
@@ -854,13 +944,6 @@ int main(void)
 //	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
   //start tim3 for dma reads
   HAL_TIM_Base_Start(&htim3);
-//  while(1) {
-//	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
-//	  HAL_Delay(500);
-//	  HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
-//	  HAL_Delay(500);
-//
-//  }
 
 
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
@@ -884,117 +967,70 @@ int main(void)
 	diagMessage.frame.data6 = 0x00;
 	diagMessage.frame.data7 = 0x00;
 
-	/* TEST RELAYS. COMMENT OUT BEFORE RUNNING */
-//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
-//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
-//
-//	HAL_Delay(3000);
-//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
-//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
-//
-//	HAL_Delay(3000);
-//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
-//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
-//	while(1) {};
 
   /* USER CODE END 2 */
 
-  /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+	if (VCUMODE == CALIBRATE_PEDALS) {
+		calibratePedalsMain();
 
-//	while (1) {
-//		if(dma_read_complete){
-//			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-//			dma_read_complete = 0;
-//			millis_since_dma_read = HAL_GetTick();
-//		}
-//	}
-//	while(1) {
-//
-//	}
+	}
 
-//	AIRUnweldHelper();
+	if (VCUMODE == UNWELD_AIRS) {
+		AIRUnweldHelper();
+	}
+
+	if (VCUMODE == CAN_TEST) {
+		CANTestHelperMain();
+	}
+
+	if (VCUMODE == DRIVE) {
 	/* DRIVE LOOP */
-	while (1) {
-
-//		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-//		txMessage.frame.id = 0b10000000011;
-//		txMessage.frame.dlc = 8;
-//		txMessage.frame.data0 = 0x61;
-//		txMessage.frame.data1 = 0x73;
-//		txMessage.frame.data2 = 0x73;
-//		txMessage.frame.data3 = 0x68;
-//		txMessage.frame.data4 = 0x6F;
-//		txMessage.frame.data5 = 0x6C;
-//		txMessage.frame.data6 = 0x65;
-//		txMessage.frame.data7 = 0x73;
-//		CANSPI_Transmit(&txMessage);
-//
-//		HAL_Delay(100);
-//
-//
-//		if(CANSPI_Receive(&rxMessage))
-//		{
-//			uCAN_MSG orangeMessage = rxMessage;
-//			uCAN_MSG ppMesage;
-//			ppMesage.frame.idType = rxMessage.frame.idType;
-//			ppMesage.frame.id = rxMessage.frame.id;
-//			ppMesage.frame.dlc = rxMessage.frame.dlc;
-//			ppMesage.frame.data0 = rxMessage.frame.data0 | 0xAA;
-//			ppMesage.frame.data1 = rxMessage.frame.data1 | 0xAA;
-//			ppMesage.frame.data2 = rxMessage.frame.data2 | 0xAA;
-//			ppMesage.frame.data3 = rxMessage.frame.data3 | 0xAA;
-//			ppMesage.frame.data4 = rxMessage.frame.data4 | 0xAA;
-//			ppMesage.frame.data5 = rxMessage.frame.data5 | 0xAA;
-//			ppMesage.frame.data6 = rxMessage.frame.data6 | 0xAA;
-//			ppMesage.frame.data7 = rxMessage.frame.data7 | 0xAA;
-//			uCAN_MSG ppMessage2 = ppMesage;
-//
-//			CANSPI_Transmit(&ppMesage);
-//
-//		}
+		while (1) {
 
 
-		if (!readyToDrive) {
-			lookForRTD();
+
+			if (!readyToDrive) {
+				lookForRTD();
+			}
+	//
+			// Check for new CAN data
+			if (CANSPI_Receive(&rxMessage)) {
+				readFromCAN();
+			}
+
+
+			if(dma_read_complete){
+				HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+				dma_read_complete = 0;
+				millis_since_dma_read = HAL_GetTick();
+			}
+
+
+			updateBMSDiagnostics();
+
+
+			// Periodically do your torque calculations:
+			calculateTorqueRequest();
+			checkAPPSPlausibility();
+			checkCrossCheck();
+
+			checkShutdown();  // If pin is low, torque->0, block
+
+			finalTorqueRequest   = requestedTorque;
+			lastRequestedTorque  = requestedTorque;
+
+
+
+			if (readyToDrive || rtdoverride == 1) {
+				sendTorqueCommand();
+				sendFanCommand();
+			}
+
+			sendDiagMsg();
+			// ... do other tasks as needed ...
 		}
-//
-		// Check for new CAN data
-		if (CANSPI_Receive(&rxMessage)) {
-			readFromCAN();
-		}
-
-
-		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-			dma_read_complete = 0;
-			millis_since_dma_read = HAL_GetTick();
-		}
-
-
-		updateBMSDiagnostics();
-
-
-		// Periodically do your torque calculations:
-		calculateTorqueRequest();
-		checkAPPSPlausibility();
-		checkCrossCheck();
-
-		checkShutdown();  // If pin is low, torque->0, block
-
-		finalTorqueRequest   = requestedTorque;
-		lastRequestedTorque  = requestedTorque;
-
-
-
-		if (readyToDrive || rtdoverride == 1) {
-			sendTorqueCommand();
-			sendFanCommand();
-		}
-
-		sendDiagMsg();
-		// ... do other tasks as needed ...
 	}
     /* USER CODE END WHILE */
 
