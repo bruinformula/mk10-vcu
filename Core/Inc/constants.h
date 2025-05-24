@@ -20,7 +20,7 @@ const uint16_t APPS_2_ADC_MIN_VAL = 372;
 
 //Nm
 const float MIN_TORQUE = -10;
-const float MAX_TORQUE = 75;
+const float MAX_TORQUE = 125 - MIN_TORQUE; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
 //const float MIN_TORQUE = 0;
 //const float MAX_TORQUE = 0;
 
