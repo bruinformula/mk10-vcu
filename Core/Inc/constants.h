@@ -29,7 +29,7 @@ const float REGEN_MAX_TORQUE = -30;
 //const float REGEN_BASELINE_TORQUE = 0;
 //const float REGEN_MAX_TORQUE = 0;
 
-const float MAX_RPM = 5000;
+const float MAX_RPM = 5500;
 
 const uint16_t BSE_ADC_MIN_VAL = 371;
 const uint16_t BSE_ADC_MAX_VAL = 4085;
