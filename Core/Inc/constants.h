@@ -20,7 +20,7 @@ const uint16_t APPS_2_ADC_MIN_VAL = 372;
 
 //Nm
 const float MIN_TORQUE = -10;
-const float MAX_TORQUE = 125 - MIN_TORQUE; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
+const float MAX_TORQUE = 125; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
 //const float MIN_TORQUE = 0;
 //const float MAX_TORQUE = 0;
 
@@ -36,7 +36,7 @@ const uint16_t BSE_ADC_MAX_VAL = 4085;
 
 
 const float APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 10;
-const uint16_t APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
+const uint16_t APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS = 110;
 
 const uint16_t BRAKE_ACTIVATED_ADC_VAL = 800;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;

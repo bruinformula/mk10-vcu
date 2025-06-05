@@ -33,7 +33,8 @@
 /* options:
  * DRIVE : drive the car
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
- *
+ * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, etc.
+ * CAN_TEST : test can :skull:
  */
 const uint8_t VCUMODE = DRIVE;
 
@@ -176,9 +177,9 @@ void checkAPPSPlausibility(void);
 void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
-void sendPrechargeRequest(void);
+uint8_t sendPrechargeRequest(void);
 uint8_t prechargeSequence(void);
-void checkShutdown(void);
+uint8_t checkShutdown(void);
 void PlayStartupSoundOnce(void);
 void updateInverterVolts(void);
 void lookForRTD(void);
@@ -240,7 +241,7 @@ uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
 /**
  * @brief  Check the shutdown pin; if high, set torque to 0 and block forever.
  */
-void checkShutdown(){
+uint8_t checkShutdown(){
 	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 	//	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00111110;
 	sendDiagMsg();
@@ -264,6 +265,8 @@ void checkShutdown(){
 		prechargeFinished = false;
 		cpockandballs = 0;
 
+
+		//disable inverter
 		for (int i = 0; i < 3; i++) {
 			txMessage.frame.id = 0x0C0;
 			txMessage.frame.dlc = 8;
@@ -282,9 +285,12 @@ void checkShutdown(){
 		sendDiagMsg();
 
 		HAL_Delay(5000);
+		return 0; //shutdown broken
 
 		//		lookForRTD();
 	}
+
+	return 1; //shutdown OK
 }
 
 /**
@@ -425,6 +431,9 @@ void calculateTorqueRequest(void)
 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
 	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
 	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
+	if (!apps_plausible && !cross_check_plausible) {
+		requestedTorque = 0;
+	}
 	if(appsValue >= 0){ //apps travel is in range for forward torque
 		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
 
@@ -452,7 +461,7 @@ void checkAPPSPlausibility(void) {
 
 	float paininmyass = fabsf(apps1_as_percent - apps2_as_percent);
 
-	if (fabsf(apps1_as_percent - apps2_as_percent)
+	if (apps_plausible && fabsf(apps1_as_percent - apps2_as_percent)
 			> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE)
 	{
 		millis_since_apps_implausible = HAL_GetTick();
@@ -503,8 +512,12 @@ void checkCrossCheck(void) {
  */
 void sendTorqueCommand(void) {
 
-	if (requestedTorque >= 94) {
-		requestedTorque = 94;
+	if (requestedTorque >= MAX_TORQUE) {
+		requestedTorque = MAX_TORQUE;
+	}
+
+	if (!apps_plausible && !cross_check_plausible) {
+		requestedTorque = 0;
 	}
 
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
@@ -576,9 +589,10 @@ void checkReadyToDrive(void) {
 
 /**
  * @brief If a hardware pin requests pre-charge, triggers pre-charge sequence
+ * returns 1 if successful, 0 otherwise
  */
 
-void sendPrechargeRequest(void){
+uint8_t sendPrechargeRequest(void){
 
 	while(!prechargeFinished){
 		//			checkAPPSPlausibility();
@@ -595,15 +609,19 @@ void sendPrechargeRequest(void){
 			}
 			else if (pinState == GPIO_PIN_RESET){
 				prechargeState = false;
+				return 0;
 			}
 			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-				prechargeSequence();
-				prechargeFinished = true;
+				prechargeFinished = prechargeSequence();
+				return prechargeFinished;
 			}
+
 		} else if (BMS_TYPE == CUSTOM_BMS) {
 			while (1) {}
 		}
 	}
+
+	return 1;
 }
 
 /**
@@ -657,6 +675,8 @@ uint8_t prechargeSequence(void){
 		penis = HAL_GetTick() - startPrechargeTime;
 		sendDiagMsg();
 	}
+
+
 
 	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
 	HAL_Delay(5);
@@ -752,43 +772,51 @@ void lookForRTD(void) {
 
 		sendPrechargeRequest();
 
-		// If the driver is ready to drive, send torque over CAN
 		uint8_t prevReadyToDrive = readyToDrive;
 		checkReadyToDrive();
+		if (!checkShutdown()) {
+			sendDiagMsg();
+			return;
+		}
 
+		if (prechargeFinished) {
+			// If the driver is ready to drive, send torque over CAN
 
-		if (readyToDrive) {
-			// If we just transitioned from not-ready to ready, play sound
-			if(!prevReadyToDrive){
-				beginTorqueRequests = true;
-				PlayStartupSoundOnce();
-				diagMessage.frame.data7 = diagMessage.frame.data7 | 0x10000000;
-				diagMessage.frame.data7 = diagMessage.frame.data7 & 0x11111110;
+			sendDiagMsg();
 
-				//send disable message, maybe this'll let lockout go away
-				for (int erectiledysfunction = 0; erectiledysfunction < 3; erectiledysfunction++) {
-					txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-					txMessage.frame.id = 0x0C0;
-					txMessage.frame.dlc = 8;
-					txMessage.frame.data0 = 0;
-					txMessage.frame.data1 = 0;
-					txMessage.frame.data2 = 0;
-					txMessage.frame.data3 = 0;
-					txMessage.frame.data4 = 0;
-					txMessage.frame.data5 = 0;
-					txMessage.frame.data6 = 0;
-					txMessage.frame.data7 = 0;
-					CANSPI_Transmit(&txMessage);
+			if (readyToDrive) {
+				// If we just transitioned from not-ready to ready, play sound
+				if(!prevReadyToDrive){
+					beginTorqueRequests = true;
+					PlayStartupSoundOnce();
+					diagMessage.frame.data7 = diagMessage.frame.data7 | 0x10000000;
+					diagMessage.frame.data7 = diagMessage.frame.data7 & 0x11111110;
 
-					HAL_Delay(100);
+					//send disable message, maybe this'll let lockout go away
+					for (int erectiledysfunction = 0; erectiledysfunction < 3; erectiledysfunction++) {
+						txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+						txMessage.frame.id = 0x0C0;
+						txMessage.frame.dlc = 8;
+						txMessage.frame.data0 = 0;
+						txMessage.frame.data1 = 0;
+						txMessage.frame.data2 = 0;
+						txMessage.frame.data3 = 0;
+						txMessage.frame.data4 = 0;
+						txMessage.frame.data5 = 0;
+						txMessage.frame.data6 = 0;
+						txMessage.frame.data7 = 0;
+						CANSPI_Transmit(&txMessage);
+
+						HAL_Delay(100);
+					}
+
+				} else {
+					beginTorqueRequests = false;
 				}
 
-			} else {
-				beginTorqueRequests = false;
 			}
-
+			sendDiagMsg();
 		}
-		sendDiagMsg();
 	}
 }
 
