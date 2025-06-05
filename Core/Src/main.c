@@ -33,10 +33,11 @@
 /* options:
  * DRIVE : drive the car
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
- *
+ * CALIBRATE_PEDALS : just read pedalzs and run pedal-related functions. does not make torque requests
+ * CAN_TEST : test CANBUS by spamming a message and echoing any received messages
  */
-const uint8_t VCUMODE = DRIVE;
 
+uint8_t VCUMODE = DRIVE;
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
 #include "startup_sound.h"  // Contains 'startup_sound' array and 'startup_sound_len'
@@ -96,6 +97,7 @@ uCAN_MSG txMessage;
 uCAN_MSG rxMessage;
 uCAN_MSG diagMessage;
 uCAN_MSG fanMessage;
+uCAN_MSG switchMessage;
 
 
 
@@ -151,6 +153,11 @@ static const uint16_t *wavePCM = NULL; // pointer to PCM data in Flash
 static uint32_t halfwordCount  = 0; // total halfwords
 static uint8_t waveFinished    = 0; // flag if wave is finished
 
+//powers witching shits
+#define POWERSOURCE_BATTERY 0
+#define POWERSOURCE_DCDC    1
+#define ENABLE_DCDCS 0 //if this is 0, power will never get switched to DCDC power
+uint8_t powerSource = POWERSOURCE_BATTERY;
 
 // customiABILTY shits
 const uint8_t BMS_TYPE = ORION_BMS;
@@ -554,11 +561,26 @@ void sendFanCommand(void) {
 
 	CANSPI_Transmit(&diagMessage);
 }
-uint8_t pinState;
+
+void sendFuseboxHeartbeat(void) {
+	switchMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	switchMessage.frame.id = 0x6FB;
+	switchMessage.frame.dlc = 2;
+	if (HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin)) {
+		switchMessage.frame.data0 = 1;
+	} else {
+		switchMessage.frame.data0 = 0x00;
+	}
+	if (ENABLE_DCDCS) switchMessage.frame.data1 = powerSource;
+	else switchMessage.frame.data1 = 0;
+
+	CANSPI_Transmit(&switchMessage);
+}
 /**
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
  */
 void checkReadyToDrive(void) {
+	uint8_t pinState;
 	pinState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	cpockandballs = HAL_GetTick() -millis_RTD;
@@ -651,6 +673,7 @@ uint8_t prechargeSequence(void){
 			penispenispenis = bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts;
 			diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00011000;
 			sendDiagMsg();
+
 			return 1;
 		}
 
@@ -748,10 +771,14 @@ void lookForRTD(void) {
 		//		  HAL_Delay(1);
 		//	  }
 
-
+		sendFuseboxHeartbeat();
 
 		sendPrechargeRequest();
 
+
+		//switch to DCDC power
+		powerSource = POWERSOURCE_DCDC;
+		sendFuseboxHeartbeat();
 		// If the driver is ready to drive, send torque over CAN
 		uint8_t prevReadyToDrive = readyToDrive;
 		checkReadyToDrive();
@@ -817,6 +844,7 @@ typedef struct {
 PedalBounds APPS1Bounds;
 PedalBounds APPS2Bounds;
 PedalBounds BSEBounds;
+uint16_t maxdiff = 0;
 
 void calibratePedalsMain(void) {
 	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
@@ -986,7 +1014,7 @@ int main(void)
 		/* DRIVE LOOP */
 		while (1) {
 
-
+			sendFuseboxHeartbeat();
 
 			if (!readyToDrive) {
 				lookForRTD();

@@ -12,15 +12,15 @@ const uint16_t APPS1_RANK = 1;
 const uint16_t APPS2_RANK = 2;
 const uint16_t BSE_RANK = 3;
 
-const uint16_t APPS_1_ADC_MAX_VAL = 3116;
-const uint16_t APPS_1_ADC_MIN_VAL = 312;
+const uint16_t APPS_1_ADC_MAX_VAL = 3050;
+const uint16_t APPS_1_ADC_MIN_VAL = 315;
 
-const uint16_t APPS_2_ADC_MAX_VAL = 3718;
-const uint16_t APPS_2_ADC_MIN_VAL = 372;
+const uint16_t APPS_2_ADC_MAX_VAL = 3600;
+const uint16_t APPS_2_ADC_MIN_VAL = 360;
 
 //Nm
 const float MIN_TORQUE = -10;
-const float MAX_TORQUE = 125 - MIN_TORQUE; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
+const float MAX_TORQUE = 75;
 //const float MIN_TORQUE = 0;
 //const float MAX_TORQUE = 0;
 
