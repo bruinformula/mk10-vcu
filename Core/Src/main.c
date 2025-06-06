@@ -475,31 +475,38 @@ void checkAPPSPlausibility(void) {
 /**
  * @brief Check rank-check between APPS and brake pedal.
  */
-void checkCrossCheck(void) {
+void checkCrossCheck(void)
+{
+    // tryna soften brake ADC chatter
+    static uint16_t bseFilt = 0;
+    bseFilt = (bseFilt + bseValue) >> 1; // 2-sample moving-average filter
 
-	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
-							/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
+    float apps1p = ((float)apps1Value - APPS_1_ADC_MIN_VAL) /
+                   (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
+    float apps2p = ((float)apps2Value - APPS_2_ADC_MIN_VAL) /
+                   (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
+    float apps_as_percent = (apps1p + apps2p) / 2.0f;
 
-	float apps1p = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
-							/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
-	float apps2p = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
-							/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
-	float apps_as_percent = (apps1p + apps2p) / 2.0f;
+    // trip when Brake ON + APPS > 25 % (ev.4.7.1)
+    if (apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT && // >25 %
+        bseFilt > BRAKE_ACTIVATED_ADC_VAL) // brake
+    {
+        cross_check_plausible = 0;  // flag fault
+        requestedTorque = 0;  // torque --> 0 immediately
+    }
 
-	if (apps_as_percent > CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT &&
-			bseValue > BRAKE_ACTIVATED_ADC_VAL)
-	{
-		cross_check_plausible = 0;
-		requestedTorque = 0;
-	}
-	else if (!cross_check_plausible &&
-			(apps_as_percent > CROSS_CHECK_RESTORATION_APPS_PERCENT))
-	{
-		requestedTorque = 0;
-	}
-	else {
-		cross_check_plausible = 1;
-	}
+    // stay latched until APPS < 5 % (ev.4.7.2b)
+    if (!cross_check_plausible)
+    {
+        if (apps_as_percent < CROSS_CHECK_RESTORATION_APPS_PERCENT)  // <5 %
+        {
+            cross_check_plausible = 1;  // fault cleared
+        }
+        else
+        {
+            requestedTorque = 0; // keep torque at zero
+        }
+    }
 }
 
 /**
@@ -511,9 +518,9 @@ void sendTorqueCommand(void) {
 		requestedTorque = MAX_TORQUE;
 	}
 
-	if (!apps_plausible && !cross_check_plausible) {
-		requestedTorque = 0;
-}
+	if (!apps_plausible || !cross_check_plausible) {   // trip on either fault
+	    requestedTorque = 0;
+	}
 
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
