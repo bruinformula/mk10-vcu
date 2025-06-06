@@ -554,6 +554,48 @@ void sendTorqueCommand(void) {
 }
 
 
+void sendDebugTorqueCommand(void) {
+
+	if (requestedTorque >= MAX_TORQUE) {
+		requestedTorque = MAX_TORQUE;
+	}
+
+	if (!apps_plausible || !cross_check_plausible) {   // trip on either fault
+	    requestedTorque = 0;
+	}
+
+	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
+
+	// Break the torqueValue into two bytes (little-endian)
+	uint8_t msg0 = (uint8_t)(torqueValue & 0xFF);
+	uint8_t msg1 = (uint8_t)((torqueValue >> 8) & 0xFF);
+
+
+
+	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	txMessage.frame.id     = 0x5C0;
+	txMessage.frame.dlc    = 8;
+
+	txMessage.frame.data0 = msg0; //torque request
+	txMessage.frame.data1 = msg1;
+	txMessage.frame.data2 = 0; // speed request (only maters in speed mode)
+	txMessage.frame.data3 = 0;
+	txMessage.frame.data4 = 0; //direction
+
+	//lockout
+	if(beginTorqueRequests){
+		txMessage.frame.data5 = 1;
+	}else{
+		txMessage.frame.data5 = 0;
+	}
+
+	txMessage.frame.data6 = 0;
+	txMessage.frame.data7 = 0;
+
+	CANSPI_Transmit(&txMessage);
+}
+
+
 
 void sendFanCommand(void) {
 	fanMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
@@ -868,6 +910,8 @@ void calibratePedalsMain(void) {
 		calculateTorqueRequest();
 		checkAPPSPlausibility();
 		checkCrossCheck();
+
+		sendDebugTorqueCommand();
 	}
 }
 
