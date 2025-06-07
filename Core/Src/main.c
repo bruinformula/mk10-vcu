@@ -456,24 +456,24 @@ typedef struct {
 } ThrottleTorquePair;
 
 const static ThrottleTorquePair torqueMap[20] = {
-    { 0,  0 },
-    { 0.05, 5 },
-    {0.10, 10 },
-    {0.15, 20 },
-    {0.20, 24540 },
-    {0.25, 28630 },
-    {0.30, 32720 },
-    {0.35, 36810 },
-    {0.40, 40900 },
-    {0.45, 44990 },
-    {0.50, 49080 },
-    {0.55, 53170 },
-    {0.60, 57260 },
-    {0.65, 61350 },
-	{0.70, 57260 },
-	{0.75, 61350 },
-	{0.80, 57260 },
-	{0.85, 61350 },
+    { 0,  -30 },
+    { 0.05, -10 },
+    {0.10, 0 },
+    {0.15, 5 },
+    {0.20, 10 },
+    {0.25, 15 },
+    {0.30, 25 },
+    {0.35, 35 },
+    {0.40, 45 },
+    {0.45, 55 },
+    {0.50, 65 },
+    {0.55, 68 },
+    {0.60, 70 },
+    {0.65, 75 },
+	{0.70, 80 },
+	{0.75, 85 },
+	{0.80, 90 },
+	{0.85, 95 },
 	{0.90, 100 },
 	{0.95, 120 },
 	{1	 , 125}
@@ -517,8 +517,8 @@ void calculateTorqueRequest(void)
 
 
 		        if (inputThrottle >= throttlePoint0 && inputThrottle <= throttlePoint1) {
-		        	uint16_t torquePoint0 = torqueMap[i].torque;
-					uint16_t torquePoint1 = torqueMap[i + 1].torque;
+		        	torquePoint0 = torqueMap[i].torque;
+					torquePoint1 = torqueMap[i + 1].torque;
 		            // Interpolate
 					pedalMapCurrSlope = (float)(torquePoint1 - torquePoint0) / (throttlePoint1 - throttlePoint0);
 		            requestedTorque = torquePoint0 + pedalMapCurrSlope * (inputThrottle - throttlePoint0);
@@ -527,12 +527,12 @@ void calculateTorqueRequest(void)
 
 		    // Extrapolation below range
 		    if (inputThrottle < torqueMap[0].throttle) {
-		       requestedTorque = REGEN_MAX_TORQUE;
+		       requestedTorque = torqueMap[0].torque;
 		    }
 
 		    // Extrapolation above range
 		    if (inputThrottle > torqueMap[MAP_SIZE - 1].throttle) {
-		        requestedTorque = MAX_TORQUE;
+		        requestedTorque = torqueMap[MAP_SIZE - 1].torque;
 		    }
 
 #endif
