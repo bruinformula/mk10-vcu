@@ -36,7 +36,7 @@
  * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, etc.
  * CAN_TEST : test can :skull:
 */
-const uint8_t VCUMODE = DRIVE;
+#define VCUMODE CALIBRATE_PEDALS
 
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
@@ -119,7 +119,7 @@ uint8_t beginTorqueRequests = false;
 // APPS plausibility
 uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
-uint8_t  dma_read_complete = 1;
+volatile uint8_t  dma_read_complete = 1;
 uint32_t millis_since_dma_read = 0;
 
 // Cross-check plausibility
@@ -132,6 +132,9 @@ uint32_t ADC_Reads[ADC_BUFFER];
 float apps1_as_percent = 0;
 float apps2_as_percent = 0;
 float bse_as_percent = 0;
+
+static float apps1Filt = 0, apps2Filt = 0, bseFilt = 0;
+
 
 // startup logic global variables
 uint8_t readyToDrive = false;
@@ -354,18 +357,34 @@ void updateInverterVolts(void) {
  */
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
-	// Store latest samples into buffers
-	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
-	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
-	bseBuffer[adcBufferIndex]   = ADC_Reads[BSE_RANK-1];
+//	// Store latest samples into buffers
+//	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
+//	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
+//	bseBuffer[adcBufferIndex]   = ADC_Reads[BSE_RANK-1];
+//
+//	// Move buffer index circularly
+//	adcBufferIndex = (adcBufferIndex + 1) % ADC_READ_BUFFER;
+//
+//	// Compute and assign median
+//	apps1Value = median_uint32_t(apps1Buffer, ADC_READ_BUFFER);
+//	apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
+//	bseValue   = median_uint32_t(bseBuffer, ADC_READ_BUFFER);
+//
+//	dma_read_complete = 1;
 
-	// Move buffer index circularly
-	adcBufferIndex = (adcBufferIndex + 1) % ADC_READ_BUFFER;
 
-	// Compute and assign median
-	apps1Value = median_uint32_t(apps1Buffer, ADC_READ_BUFFER);
-	apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
-	bseValue   = median_uint32_t(bseBuffer, ADC_READ_BUFFER);
+	/* Grab raw samples */
+	apps1Value = ADC_Reads[APPS1_RANK-1];
+	apps2Value = ADC_Reads[APPS2_RANK-1];
+	bseValue   = ADC_Reads[BSE_RANK-1];
+
+	/* Fast 1-pole IIR (α = 0.25) gives ~2-sample latency */
+	apps1Filt += 0.25f * ((float)apps1Value - apps1Filt);
+	apps2Filt += 0.25f * ((float)apps2Value - apps2Filt);
+	bseFilt   += 0.25f * ((float)bseValue   - bseFilt);
+	apps1Value = (uint32_t)apps1Filt;
+	apps2Value = (uint32_t)apps2Filt;
+	bseValue   = (uint32_t)bseFilt;
 
 	dma_read_complete = 1;
 }
@@ -420,6 +439,52 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 //	}
 //}
 
+/*
+ * PEDAL_MAP
+ * 0 is braindead
+ * 1 is skidpad; looks like x^3 function ish
+ * 2 is some weird shit i cooked up for endurance, control at low-med throttle and
+ */
+
+#define PEDAL_MAP 0
+
+#define MAP_SIZE 10
+
+typedef struct {
+    float throttle;     // x value
+    float torque;       // y value
+} ThrottleTorquePair;
+
+const static ThrottleTorquePair torqueMap[20] = {
+    { 0,  0 },
+    { 0.05, 5 },
+    {0.10, 10 },
+    {0.15, 20 },
+    {0.20, 24540 },
+    {0.25, 28630 },
+    {0.30, 32720 },
+    {0.35, 36810 },
+    {0.40, 40900 },
+    {0.45, 44990 },
+    {0.50, 49080 },
+    {0.55, 53170 },
+    {0.60, 57260 },
+    {0.65, 61350 },
+	{0.70, 57260 },
+	{0.75, 61350 },
+	{0.80, 57260 },
+	{0.85, 61350 },
+	{0.90, 100 },
+	{0.95, 120 },
+	{1	 , 125}
+};
+
+uint16_t throttlePoint0;
+uint16_t throttlePoint1;
+uint16_t torquePoint0;
+uint16_t torquePoint1;
+float pedalMapCurrSlope = 0;
+
 
 void calculateTorqueRequest(void)
 {
@@ -429,21 +494,53 @@ void calculateTorqueRequest(void)
 	if (!apps_plausible && !cross_check_plausible) {
 		requestedTorque = 0;
 	}
-	if(appsValue >= 0){ //apps travel is in range for forward torque
-		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
+#if	PEDAL_MAP == 0
+		if(appsValue >= 0){ //apps travel is in range for forward torque
+			requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
 
-		if (requestedTorque >= MAX_TORQUE) {
-			requestedTorque = MAX_TORQUE;
+			if (requestedTorque >= MAX_TORQUE) {
+				requestedTorque = MAX_TORQUE;
+			}
+		} else { //apps travel is in range for reverse torque
+			if (inverter_diagnostics.carSpeed < 5.0f) {
+				requestedTorque = 0;
+			} else {
+				float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+				requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+			}
 		}
-	} else { //apps travel is in range for reverse torque
-		if (inverter_diagnostics.carSpeed < 5.0f && VCUMODE != CALIBRATE_PEDALS) {
-			requestedTorque = 0;
-		} else {
-			float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
-			requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
-		}
-	}
+#elif PEDAL_MAP == 2
+		// Search for bounding points
+		    for (int i = 0; i < MAP_SIZE - 1; i++) {
+		    	throttlePoint0 = torqueMap[i].throttle;
+		    	throttlePoint1 = torqueMap[i + 1].throttle;
+
+
+		        if (inputThrottle >= throttlePoint0 && inputThrottle <= throttlePoint1) {
+		        	uint16_t torquePoint0 = torqueMap[i].torque;
+					uint16_t torquePoint1 = torqueMap[i + 1].torque;
+		            // Interpolate
+					pedalMapCurrSlope = (float)(torquePoint1 - torquePoint0) / (throttlePoint1 - throttlePoint0);
+		            requestedTorque = torquePoint0 + pedalMapCurrSlope * (inputThrottle - throttlePoint0);
+		        }
+		    }
+
+		    // Extrapolation below range
+		    if (inputThrottle < torqueMap[0].throttle) {
+		       requestedTorque = REGEN_MAX_TORQUE;
+		    }
+
+		    // Extrapolation above range
+		    if (inputThrottle > torqueMap[MAP_SIZE - 1].throttle) {
+		        requestedTorque = MAX_TORQUE;
+		    }
+
+#endif
 }
+
+
+
+
 
 /**
  * @brief Check plausibility of APPS sensors.
@@ -513,7 +610,7 @@ void sendTorqueCommand(void) {
 
 	if (!apps_plausible && !cross_check_plausible) {
 		requestedTorque = 0;
-}
+	}
 
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
@@ -529,14 +626,14 @@ void sendTorqueCommand(void) {
 
 	txMessage.frame.data0 = msg0; //torque request
 	txMessage.frame.data1 = msg1;
-	txMessage.frame.data2 = 0; // speed request (only maters in speed mode)
+	txMessage.frame.data2 = 0; // speed request (only matters in speed mode)
 	txMessage.frame.data3 = 0;
 	txMessage.frame.data4 = 0; //direction
 
 	//lockout
 	if(beginTorqueRequests){
 		txMessage.frame.data5 = 1;
-	}else{
+	} else {
 		txMessage.frame.data5 = 0;
 	}
 
@@ -745,7 +842,6 @@ void lookForRTD(void) {
 		}
 
 		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
 		}
@@ -827,13 +923,12 @@ PedalBounds APPS2Bounds;
 PedalBounds BSEBounds;
 
 void calibratePedalsMain(void) {
-	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
-		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-			dma_read_complete = 0;
-			millis_since_dma_read = HAL_GetTick();
-		}
-	}
+//	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
+//		if(dma_read_complete){
+//			dma_read_complete = 0;
+//			millis_since_dma_read = HAL_GetTick();
+//		}
+//	}
 	APPS1Bounds.min = 4096;
 	APPS1Bounds.max = 0;
 	APPS2Bounds.min = 4096;
@@ -844,23 +939,24 @@ void calibratePedalsMain(void) {
 
 	while (1) {
 		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
+			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
+			else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
+
+			if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
+			else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
+
+			if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
+			else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+			calculateTorqueRequest();
+			checkAPPSPlausibility();
+			checkCrossCheck();
 		}
 
-		if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
-		else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
 
-		if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
-		else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
 
-		if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
-		else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
 
-		calculateTorqueRequest();
-		checkAPPSPlausibility();
-		checkCrossCheck();
 	}
 }
 
@@ -978,19 +1074,13 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-	if (VCUMODE == CALIBRATE_PEDALS) {
-		calibratePedalsMain();
-	}
-
-	if (VCUMODE == UNWELD_AIRS) {
+#if VCUMODE == CALIBRATE_PEDALS
+	calibratePedalsMain();
+#elif VCUMODE == UNWELD_AIRS
 		AIRUnweldHelper();
-	}
-
-	if (VCUMODE == CAN_TEST) {
+#elif VCUMODE == CAN_TEST
 		CANTestHelperMain();
-	}
-
-	if (VCUMODE == DRIVE) {
+#elif VCUMODE == DRIVE
 		/* DRIVE LOOP */
 		while (1) {
 
@@ -1007,36 +1097,35 @@ int main(void)
 
 
 			if(dma_read_complete){
-				HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 				dma_read_complete = 0;
 				millis_since_dma_read = HAL_GetTick();
+
+				// Periodically do your torque calculations:
+				calculateTorqueRequest();
+				checkAPPSPlausibility();
+				checkCrossCheck();
+				finalTorqueRequest   = requestedTorque;
+				lastRequestedTorque  = requestedTorque;
+
+
+
+				if (readyToDrive || rtdoverride == 1) {
+					sendTorqueCommand();
+					//				sendFanCommand();
+				}
+				sendDiagMsg();
 			}
 
 
 			updateBMSDiagnostics();
-
-
-			// Periodically do your torque calculations:
-			calculateTorqueRequest();
-			checkAPPSPlausibility();
-			checkCrossCheck();
-
 			checkShutdown();  // If pin is low, torque->0, block
 
-			finalTorqueRequest   = requestedTorque;
-			lastRequestedTorque  = requestedTorque;
 
 
 
-			if (readyToDrive || rtdoverride == 1) {
-				sendTorqueCommand();
-				sendFanCommand();
-			}
-
-			sendDiagMsg();
 			// ... do other tasks as needed ...
 		}
-	}
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1159,6 +1248,8 @@ static void MX_ADC1_Init(void)
   }
   /* USER CODE BEGIN ADC1_Init 2 */
 
+
+	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
   /* USER CODE END ADC1_Init 2 */
 
 }

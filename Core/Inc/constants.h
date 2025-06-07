@@ -18,6 +18,8 @@ const uint16_t APPS_1_ADC_MIN_VAL = 312;
 const uint16_t APPS_2_ADC_MAX_VAL = 3718;
 const uint16_t APPS_2_ADC_MIN_VAL = 372;
 
+const float REGEN_THRESH_PERCENT = 10;
+
 //Nm
 const float MIN_TORQUE = -10;
 const float MAX_TORQUE = 125; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
