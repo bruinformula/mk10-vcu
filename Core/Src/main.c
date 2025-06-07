@@ -699,7 +699,7 @@ uint8_t prechargeSequence(void){
 			readFromCAN();
 		}
 
-		if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts < PRECHARGE_VOLTAGE_DIFF) {
+		if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts < PRECHARGE_VOLTAGE_DIFF && bms_diagnostics.packVoltage > 10) {
 
 			HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_SET); //step 4
 			HAL_Delay(5);
