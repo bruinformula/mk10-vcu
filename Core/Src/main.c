@@ -578,6 +578,9 @@ void sendTorqueCommand(void) {
 	if (finalTorqueRequest >= MAX_TORQUE) {
 		finalTorqueRequest = MAX_TORQUE;
 	}
+	if (finalTorqueRequest <= REGEN_MAX_TORQUE) {
+			finalTorqueRequest = REGEN_MAX_TORQUE;
+		}
 
 	int torqueValue = (int) (finalTorqueRequest * 10); // Convert to integer, multiply by 10
 
