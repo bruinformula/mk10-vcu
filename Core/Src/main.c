@@ -36,7 +36,7 @@
  * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, etc.
  * CAN_TEST : test can :skull:
 */
-const uint8_t VCUMODE = DRIVE;
+const uint8_t VCUMODE = CALIBRATE_PEDALS;
 
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
@@ -93,7 +93,7 @@ TIM_HandleTypeDef htim4;
 /* USER CODE BEGIN PV */
 
 // CAN messages
-uCAN_MSG txMessage;
+uCAN_MSG torqueRequestMessage;
 uCAN_MSG rxMessage;
 uCAN_MSG diagMessage;
 uCAN_MSG fanMessage;
@@ -104,6 +104,15 @@ uCAN_MSG fanMessage;
 volatile uint32_t apps1Value = 0;
 volatile uint32_t apps2Value = 0;
 volatile uint32_t bseValue   = 0;
+
+//apps bounds
+typedef struct {
+	uint32_t min;
+	uint32_t max;
+} PedalBounds;
+PedalBounds APPS1Bounds;
+PedalBounds APPS2Bounds;
+PedalBounds BSEBounds;
 
 // Torque variables
 uint32_t apps1Buffer[ADC_READ_BUFFER] = {0};
@@ -121,6 +130,11 @@ uint16_t apps_plausible = true;
 uint32_t millis_since_apps_implausible;
 uint8_t  dma_read_complete = 1;
 uint32_t millis_since_dma_read = 0;
+
+// BSE plausibility
+uint16_t bse_plausible = true;
+uint32_t millis_since_bse_implausible;
+
 
 // Cross-check plausibility
 uint16_t cross_check_plausible = true;
@@ -174,6 +188,7 @@ void readFromCAN(void);
 void updateRpm(void);
 void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
+void checkBSEPausibility(void);
 void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
@@ -250,7 +265,6 @@ void checkShutdown(){
 		requestedTorque = 0;
 
 		sendTorqueCommand();
-		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 		HAL_Delay(5);
 		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
@@ -266,17 +280,15 @@ void checkShutdown(){
 		cpockandballs = 0;
 
 		for (int i = 0; i < 3; i++) {
-			txMessage.frame.id = 0x0C0;
-			txMessage.frame.dlc = 8;
-			txMessage.frame.data0 = 0;
-			txMessage.frame.data1 = 0;
-			txMessage.frame.data2 = 0;
-			txMessage.frame.data3 = 0;
-			txMessage.frame.data4 = 0;
-			txMessage.frame.data5 = 0;
-			txMessage.frame.data6 = 0;
-			txMessage.frame.data7 = 0;
-			CANSPI_Transmit(&txMessage);
+			torqueRequestMessage.frame.data0 = 0;
+			torqueRequestMessage.frame.data1 = 0;
+			torqueRequestMessage.frame.data2 = 0;
+			torqueRequestMessage.frame.data3 = 0;
+			torqueRequestMessage.frame.data4 = 0;
+			torqueRequestMessage.frame.data5 = 0;
+			torqueRequestMessage.frame.data6 = 0;
+			torqueRequestMessage.frame.data7 = 0;
+			CANSPI_Transmit(&torqueRequestMessage);
 		}
 
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
@@ -354,6 +366,8 @@ void updateInverterVolts(void) {
  */
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
+	__disable_irq();
+
 	// Store latest samples into buffers
 	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
 	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
@@ -367,7 +381,31 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
 	bseValue   = median_uint32_t(bseBuffer, ADC_READ_BUFFER);
 
-	dma_read_complete = 1;
+	//	dma_read_complete = 1;
+
+	millis_since_dma_read = HAL_GetTick();
+
+	if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
+	else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
+
+	if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
+	else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
+
+	if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
+	else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+
+	calculateTorqueRequest();
+	checkBSEPausibility();
+	checkAPPSPlausibility();
+	checkCrossCheck();
+
+
+	finalTorqueRequest   = requestedTorque;
+	lastRequestedTorque  = requestedTorque;
+					dma_read_complete = 1;
+	//			sendDebugTorqueCommand();
+	__enable_irq();
+
 }
 
 
@@ -419,18 +457,18 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 //				* bse_as_percent + REGEN_BASELINE_TORQUE;
 //	}
 //}
-
+volatile float appsValue;
 
 void calculateTorqueRequest(void)
 {
 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
 	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
 	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
-	if (!apps_plausible && !cross_check_plausible) {
-		requestedTorque = 0;
-	}
-	if(appsValue >= 0){ //apps travel is in range for forward torque
-		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
+//	if (!apps_plausible && !cross_check_plausible) {
+//		requestedTorque = 0;
+//	}
+	if(appsValue >= APPS_INFLECTION_PERCENT){ //apps travel is in range for forward torque
+		requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * (appsValue - APPS_INFLECTION_PERCENT);
 
 		if (requestedTorque >= MAX_TORQUE) {
 			requestedTorque = MAX_TORQUE;
@@ -439,8 +477,8 @@ void calculateTorqueRequest(void)
 		if (inverter_diagnostics.carSpeed < 5.0f && VCUMODE != CALIBRATE_PEDALS) {
 			requestedTorque = 0;
 		} else {
-			float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
-			requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+//			float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+			requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*((APPS_INFLECTION_PERCENT - appsValue)/APPS_INFLECTION_PERCENT);
 		}
 	}
 }
@@ -461,16 +499,39 @@ void checkAPPSPlausibility(void) {
 	{
 		millis_since_apps_implausible = HAL_GetTick();
 		apps_plausible = 0;
-		requestedTorque = 0;
 	}
 
-	else if (!apps_plausible && (HAL_GetTick() - millis_since_apps_implausible < APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+	else if (!apps_plausible && (HAL_GetTick() - millis_since_apps_implausible > APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
 		requestedTorque = 0;
 	}
 	else {
 		apps_plausible = 1;
 	}
 }
+
+
+/**
+ * @brief Check plausibility of APPS sensors.
+ */
+void checkBSEPausibility(void) {
+	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
+							/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
+
+
+	if (bse_plausible && (bse_as_percent > 100.0f || bse_as_percent < 0.0f) )
+	{
+		millis_since_bse_implausible = HAL_GetTick();
+		bse_plausible = 0;
+	}
+
+	else if (!bse_plausible && (HAL_GetTick() - millis_since_bse_implausible < BSE_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+		requestedTorque = 0;
+	}
+	else {
+		bse_plausible = 1;
+	}
+}
+
 
 /**
  * @brief Check rank-check between APPS and brake pedal.
@@ -514,43 +575,33 @@ void checkCrossCheck(void)
  */
 void sendTorqueCommand(void) {
 
-	if (requestedTorque >= MAX_TORQUE) {
-		requestedTorque = MAX_TORQUE;
+	if (finalTorqueRequest >= MAX_TORQUE) {
+		finalTorqueRequest = MAX_TORQUE;
 	}
 
-	if (!apps_plausible || !cross_check_plausible) {   // trip on either fault
-	    requestedTorque = 0;
-	}
-
-	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
+	int torqueValue = (int) (finalTorqueRequest * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
 	uint8_t msg0 = (uint8_t)(torqueValue & 0xFF);
 	uint8_t msg1 = (uint8_t)((torqueValue >> 8) & 0xFF);
 
-
-
-	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-	txMessage.frame.id     = 0x0C0;
-	txMessage.frame.dlc    = 8;
-
-	txMessage.frame.data0 = msg0; //torque request
-	txMessage.frame.data1 = msg1;
-	txMessage.frame.data2 = 0; // speed request (only maters in speed mode)
-	txMessage.frame.data3 = 0;
-	txMessage.frame.data4 = 0; //direction
+	torqueRequestMessage.frame.data0 = msg0; //torque request
+	torqueRequestMessage.frame.data1 = msg1;
+	torqueRequestMessage.frame.data2 = 0; // speed request (only maters in speed mode)
+	torqueRequestMessage.frame.data3 = 0;
+	torqueRequestMessage.frame.data4 = 0; //direction
 
 	//lockout
 	if(beginTorqueRequests){
-		txMessage.frame.data5 = 1;
+		torqueRequestMessage.frame.data5 = 1;
 	}else{
-		txMessage.frame.data5 = 0;
+		torqueRequestMessage.frame.data5 = 0;
 	}
 
-	txMessage.frame.data6 = 0;
-	txMessage.frame.data7 = 0;
+	torqueRequestMessage.frame.data6 = 0;
+	torqueRequestMessage.frame.data7 = 0;
 
-	CANSPI_Transmit(&txMessage);
+	CANSPI_Transmit(&torqueRequestMessage);
 }
 
 
@@ -560,10 +611,6 @@ void sendDebugTorqueCommand(void) {
 		requestedTorque = MAX_TORQUE;
 	}
 
-	if (!apps_plausible || !cross_check_plausible) {   // trip on either fault
-	    requestedTorque = 0;
-	}
-
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
@@ -572,27 +619,27 @@ void sendDebugTorqueCommand(void) {
 
 
 
-	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-	txMessage.frame.id     = 0x5C0;
-	txMessage.frame.dlc    = 8;
+	torqueRequestMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	torqueRequestMessage.frame.id     = 0x5C0;
+	torqueRequestMessage.frame.dlc    = 8;
 
-	txMessage.frame.data0 = msg0; //torque request
-	txMessage.frame.data1 = msg1;
-	txMessage.frame.data2 = 0; // speed request (only maters in speed mode)
-	txMessage.frame.data3 = 0;
-	txMessage.frame.data4 = 0; //direction
+	torqueRequestMessage.frame.data0 = msg0; //torque request
+	torqueRequestMessage.frame.data1 = msg1;
+	torqueRequestMessage.frame.data2 = 0; // speed request (only maters in speed mode)
+	torqueRequestMessage.frame.data3 = 0;
+	torqueRequestMessage.frame.data4 = 0; //direction
 
 	//lockout
 	if(beginTorqueRequests){
-		txMessage.frame.data5 = 1;
+		torqueRequestMessage.frame.data5 = 1;
 	}else{
-		txMessage.frame.data5 = 0;
+		torqueRequestMessage.frame.data5 = 0;
 	}
 
-	txMessage.frame.data6 = 0;
-	txMessage.frame.data7 = 0;
+	torqueRequestMessage.frame.data6 = 0;
+	torqueRequestMessage.frame.data7 = 0;
 
-	CANSPI_Transmit(&txMessage);
+	CANSPI_Transmit(&torqueRequestMessage);
 }
 
 
@@ -824,18 +871,15 @@ void lookForRTD(void) {
 
 				//send disable message, maybe this'll let lockout go away
 				for (int erectiledysfunction = 0; erectiledysfunction < 3; erectiledysfunction++) {
-					txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-					txMessage.frame.id = 0x0C0;
-					txMessage.frame.dlc = 8;
-					txMessage.frame.data0 = 0;
-					txMessage.frame.data1 = 0;
-					txMessage.frame.data2 = 0;
-					txMessage.frame.data3 = 0;
-					txMessage.frame.data4 = 0;
-					txMessage.frame.data5 = 0;
-					txMessage.frame.data6 = 0;
-					txMessage.frame.data7 = 0;
-					CANSPI_Transmit(&txMessage);
+					torqueRequestMessage.frame.data0 = 0;
+					torqueRequestMessage.frame.data1 = 0;
+					torqueRequestMessage.frame.data2 = 0;
+					torqueRequestMessage.frame.data3 = 0;
+					torqueRequestMessage.frame.data4 = 0;
+					torqueRequestMessage.frame.data5 = 0;
+					torqueRequestMessage.frame.data6 = 0;
+					torqueRequestMessage.frame.data7 = 0;
+					CANSPI_Transmit(&torqueRequestMessage);
 
 					HAL_Delay(100);
 				}
@@ -867,22 +911,16 @@ void AIRUnweldHelper(void) {
 	}
 }
 
-typedef struct {
-	uint32_t min;
-	uint32_t max;
-} PedalBounds;
-PedalBounds APPS1Bounds;
-PedalBounds APPS2Bounds;
-PedalBounds BSEBounds;
+
 
 void calibratePedalsMain(void) {
-	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
-		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-			dma_read_complete = 0;
-			millis_since_dma_read = HAL_GetTick();
-		}
-	}
+//	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
+//		if(dma_read_complete){
+//
+//			dma_read_complete = 0;
+//			millis_since_dma_read = HAL_GetTick();
+//		}
+//	}
 	APPS1Bounds.min = 4096;
 	APPS1Bounds.max = 0;
 	APPS2Bounds.min = 4096;
@@ -893,42 +931,47 @@ void calibratePedalsMain(void) {
 
 	while (1) {
 		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
-			dma_read_complete = 0;
+			__disable_irq();
 			millis_since_dma_read = HAL_GetTick();
+//
+//			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
+//			else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
+//
+//			if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
+//			else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
+//
+//			if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
+//			else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+//
+//			calculateTorqueRequest();
+//			checkBSEPausibility();
+//			checkAPPSPlausibility();
+//			checkCrossCheck();
+//
+//
+//			finalTorqueRequest   = requestedTorque;
+//			lastRequestedTorque  = requestedTorque;
+			dma_read_complete = 0;
+			__enable_irq();
+//			sendDebugTorqueCommand();
 		}
-
-		if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
-		else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
-
-		if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
-		else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
-
-		if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
-		else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
-
-		calculateTorqueRequest();
-		checkAPPSPlausibility();
-		checkCrossCheck();
-
-		sendDebugTorqueCommand();
 	}
 }
 
 void CANTestHelperMain(void) {
 
-	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
-	txMessage.frame.id = 0b10000000011;
-	txMessage.frame.dlc = 8;
-	txMessage.frame.data0 = 0x61;
-	txMessage.frame.data1 = 0x73;
-	txMessage.frame.data2 = 0x73;
-	txMessage.frame.data3 = 0x68;
-	txMessage.frame.data4 = 0x6F;
-	txMessage.frame.data5 = 0x6C;
-	txMessage.frame.data6 = 0x65;
-	txMessage.frame.data7 = 0x73;
-	CANSPI_Transmit(&txMessage);
+	torqueRequestMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	torqueRequestMessage.frame.id = 0b10000000011;
+	torqueRequestMessage.frame.dlc = 8;
+	torqueRequestMessage.frame.data0 = 0x61;
+	torqueRequestMessage.frame.data1 = 0x73;
+	torqueRequestMessage.frame.data2 = 0x73;
+	torqueRequestMessage.frame.data3 = 0x68;
+	torqueRequestMessage.frame.data4 = 0x6F;
+	torqueRequestMessage.frame.data5 = 0x6C;
+	torqueRequestMessage.frame.data6 = 0x65;
+	torqueRequestMessage.frame.data7 = 0x73;
+	CANSPI_Transmit(&torqueRequestMessage);
 
 	HAL_Delay(100);
 
@@ -1001,11 +1044,19 @@ int main(void)
 	//start tim3 for dma reads
 	HAL_TIM_Base_Start(&htim3);
 
+	//start DMA
+	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
+	APPS1Bounds.min = 4096;
+		APPS1Bounds.max = 0;
+		APPS2Bounds.min = 4096;
+		APPS2Bounds.max = 0;
+		BSEBounds.min = 4096;
+		BSEBounds.max = 0;
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
-	if (CANSPI_Initialize() != true) {
-		Error_Handler();
-	}
+//	if (CANSPI_Initialize() != true) {
+//		Error_Handler();
+//	}
 
 	// Initialize some diagnostics values
 	//	bms_diagnostics.inverterActive = 1;
@@ -1022,6 +1073,10 @@ int main(void)
 	diagMessage.frame.data5 = 0x00;
 	diagMessage.frame.data6 = 0x00;
 	diagMessage.frame.data7 = 0x00;
+
+	torqueRequestMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
+	torqueRequestMessage.frame.id = 0x0C0;
+	torqueRequestMessage.frame.dlc = 8;
 
 
   /* USER CODE END 2 */
@@ -1058,9 +1113,21 @@ int main(void)
 
 
 			if(dma_read_complete){
-				HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 				dma_read_complete = 0;
 				millis_since_dma_read = HAL_GetTick();
+
+				calculateTorqueRequest();
+				checkBSEPausibility();
+				checkAPPSPlausibility();
+				checkCrossCheck();
+
+
+				finalTorqueRequest   = requestedTorque;
+				lastRequestedTorque  = requestedTorque;
+				if (readyToDrive || rtdoverride == 1) {
+					sendTorqueCommand();
+					//				sendFanCommand();
+				}
 			}
 
 
@@ -1068,21 +1135,15 @@ int main(void)
 
 
 			// Periodically do your torque calculations:
-			calculateTorqueRequest();
-			checkAPPSPlausibility();
-			checkCrossCheck();
+
 
 			checkShutdown();  // If pin is low, torque->0, block
 
-			finalTorqueRequest   = requestedTorque;
-			lastRequestedTorque  = requestedTorque;
 
 
 
-			if (readyToDrive || rtdoverride == 1) {
-				sendTorqueCommand();
-				sendFanCommand();
-			}
+
+
 
 			sendDiagMsg();
 			// ... do other tasks as needed ...
@@ -1174,7 +1235,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_TRGO;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 3;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -1305,9 +1366,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 4;
+  htim3.Init.Prescaler = 1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 10001;
+  htim3.Init.Period = 1000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
