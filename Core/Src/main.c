@@ -33,11 +33,11 @@
 /* options:
  * DRIVE : drive the car
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
- * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, etc.
+ * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, readsPer100ms, etc.
  * CAN_TEST : test can :skull:
  * DEBUG : idfk you choose
 */
-const uint8_t VCUMODE = CALIBRATE_PEDALS;
+#define VCUMODE CALIBRATE_PEDALS
 
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
@@ -101,6 +101,14 @@ uCAN_MSG fanMessage;
 
 //debug variable for pin state
 uint8_t pinState;
+
+//apps reads per 100ms; counter and actual value
+uint16_t readsPer100msCounter = 0;
+uint16_t readsPer100ms = 0;
+
+//current tick, update whenever u want a value
+uint32_t currtick = 0;
+
 
 
 // ADC readings
@@ -372,7 +380,9 @@ void updateInverterVolts(void) {
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	__disable_irq();
-
+#if VCUMODE == CALIBRATE_PEDALS
+	readsPer100msCounter++;
+#endif
 	// Store latest samples into buffers
 	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
 	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
@@ -491,25 +501,34 @@ void calculateTorqueRequest(void)
 /**
  * @brief Check plausibility of APPS sensors.
  */
+float paininmyass = 0.0;
 void checkAPPSPlausibility(void) {
 	apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
-							/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
+			/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
 	apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
-							/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
+			/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
 
-	float paininmyass = fabsf(apps1_as_percent - apps2_as_percent);
-
-	if (apps_plausible && fabsf(apps1_as_percent - apps2_as_percent)
-			> APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE)
-	{
-		millis_since_apps_implausible = HAL_GetTick();
+	paininmyass = fabsf(fabsf(apps1_as_percent) - fabsf(apps2_as_percent));
+	currtick = HAL_GetTick();
+	if (paininmyass > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+		if (apps_plausible)
+			millis_since_apps_implausible = HAL_GetTick(); //only grab the tick if it switched
 		apps_plausible = 0;
+		if (!apps_plausible
+				&& (HAL_GetTick() - millis_since_apps_implausible
+						> APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+			requestedTorque = 0;
+		}
 	}
-
-	else if (!apps_plausible && (HAL_GetTick() - millis_since_apps_implausible > APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS)) {
+	if (apps1_as_percent < -10.0 || apps2_as_percent < -10.0) {
+		apps_plausible = 0;
 		requestedTorque = 0;
 	}
-	else {
+	if (paininmyass > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+		requestedTorque = 0;
+	}
+
+	else if (paininmyass < APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		apps_plausible = 1;
 	}
 }
@@ -583,6 +602,10 @@ void sendTorqueCommand(void) {
 	if (finalTorqueRequest >= MAX_TORQUE) {
 		finalTorqueRequest = MAX_TORQUE;
 	}
+
+	if (finalTorqueRequest <= REGEN_MAX_TORQUE) {
+			finalTorqueRequest = REGEN_MAX_TORQUE;
+		}
 
 	int torqueValue = (int) (finalTorqueRequest * 10); // Convert to integer, multiply by 10
 
@@ -899,6 +922,10 @@ void lookForRTD(void) {
 
 void AIRUnweldHelper(void) {
 	uint16_t flicker_delay = 500;
+	HAL_ADC_Stop_DMA(&hadc1);
+
+	HAL_ADC_DeInit(&hadc1);
+
 	while(1) {
 		HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 		HAL_Delay(flicker_delay);
@@ -916,7 +943,7 @@ void AIRUnweldHelper(void) {
 }
 
 
-
+uint32_t lastCalcReadsPerSecTime = 0;
 void calibratePedalsMain(void) {
 //	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
 //		if(dma_read_complete){
@@ -932,7 +959,8 @@ void calibratePedalsMain(void) {
 	BSEBounds.min = 4096;
 	BSEBounds.max = 0;
 
-
+	 lastCalcReadsPerSecTime = HAL_GetTick();
+	 uint8_t lastdmaread = HAL_GetTick();
 	while (1) {
 		if(dma_read_complete){
 			__disable_irq();
@@ -955,10 +983,17 @@ void calibratePedalsMain(void) {
 //
 //			finalTorqueRequest   = requestedTorque;
 //			lastRequestedTorque  = requestedTorque;
+			if (HAL_GetTick() - lastCalcReadsPerSecTime > 100) {
+				readsPer100ms = readsPer100msCounter*10; //convert to reads per second
+				readsPer100msCounter = 0;
+				lastCalcReadsPerSecTime = HAL_GetTick();
+			}
 			dma_read_complete = 0;
 			__enable_irq();
 //			sendDebugTorqueCommand();
 		}
+
+
 	}
 }
 
@@ -1065,11 +1100,13 @@ int main(void)
   /* USER CODE BEGIN 2 */
 	// Start TIM4
 	//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-	//start tim3 for dma reads
-	HAL_TIM_Base_Start(&htim3);
+  //start tim3 for dma reads
+  	HAL_TIM_Base_Start(&htim3);
 
 	//start DMA
 	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+
+
 
 	APPS1Bounds.min = 4096;
 		APPS1Bounds.max = 0;
@@ -1141,17 +1178,8 @@ int main(void)
 
 
 			if(dma_read_complete){
+
 				dma_read_complete = 0;
-				millis_since_dma_read = HAL_GetTick();
-
-				calculateTorqueRequest();
-				checkBSEPausibility();
-				checkAPPSPlausibility();
-				checkCrossCheck();
-
-
-				finalTorqueRequest   = requestedTorque;
-				lastRequestedTorque  = requestedTorque;
 				if (readyToDrive || rtdoverride == 1) {
 					sendTorqueCommand();
 					//				sendFanCommand();
@@ -1394,7 +1422,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 1;
+  htim3.Init.Prescaler = 4;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 1000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -1409,7 +1437,7 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
