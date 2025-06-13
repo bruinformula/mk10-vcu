@@ -1175,31 +1175,19 @@ int main(void)
 			if (CANSPI_Receive(&rxMessage)) {
 				readFromCAN();
 			}
+			checkShutdown();  // If pin is low, torque->0, block
 
 
 			if(dma_read_complete){
-
-				dma_read_complete = 0;
 				if (readyToDrive || rtdoverride == 1) {
 					sendTorqueCommand();
 					//				sendFanCommand();
 				}
+				dma_read_complete = 0;
 			}
 
 
 			updateBMSDiagnostics();
-
-
-			// Periodically do your torque calculations:
-
-
-			checkShutdown();  // If pin is low, torque->0, block
-
-
-
-
-
-
 
 			sendDiagMsg();
 			// ... do other tasks as needed ...
@@ -1422,9 +1410,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 4;
+  htim3.Init.Prescaler = 1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1000;
+  htim3.Init.Period = 500;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -1437,7 +1425,7 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();

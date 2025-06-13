@@ -18,16 +18,16 @@ const uint16_t BSE_RANK = 1;
 //const uint16_t APPS_2_ADC_MAX_VAL = 4095;
 //const uint16_t APPS_2_ADC_MIN_VAL = 409;
 
-const uint16_t APPS_1_ADC_MAX_VAL = 3108;
-const uint16_t APPS_1_ADC_MIN_VAL = 979;
-
-const uint16_t APPS_2_ADC_MAX_VAL = 4095;
-const uint16_t APPS_2_ADC_MIN_VAL = 1657;
 //const uint16_t APPS_1_ADC_MAX_VAL = 3108;
-//const uint16_t APPS_1_ADC_MIN_VAL = 669;
+//const uint16_t APPS_1_ADC_MIN_VAL = 979;
 //
 //const uint16_t APPS_2_ADC_MAX_VAL = 4095;
-//const uint16_t APPS_2_ADC_MIN_VAL = 1248;
+//const uint16_t APPS_2_ADC_MIN_VAL = 1657;
+const uint16_t APPS_1_ADC_MAX_VAL = 2600;
+const uint16_t APPS_1_ADC_MIN_VAL = 680;
+
+const uint16_t APPS_2_ADC_MAX_VAL = 3812;
+const uint16_t APPS_2_ADC_MIN_VAL = 1217;
 
 
 const float APPS_INFLECTION_PERCENT = 0.1;
