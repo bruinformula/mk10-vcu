@@ -8,9 +8,9 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 1;
-const uint16_t APPS2_RANK = 2;
-const uint16_t BSE_RANK = 3;
+const uint16_t APPS1_RANK = 2;
+const uint16_t APPS2_RANK = 3;
+const uint16_t BSE_RANK = 1;
 
 //const uint16_t APPS_1_ADC_MAX_VAL = 3116;
 //const uint16_t APPS_1_ADC_MIN_VAL = 312;
@@ -29,8 +29,11 @@ const uint16_t APPS_2_ADC_MIN_VAL = 1657;
 //const uint16_t APPS_2_ADC_MAX_VAL = 4095;
 //const uint16_t APPS_2_ADC_MIN_VAL = 1248;
 
+
+const float APPS_INFLECTION_PERCENT = 0.1;
+
 //Nm
-const float MIN_TORQUE = -10;
+const float MIN_TORQUE = 0;
 const float MAX_TORQUE = 125; //adjust maxtorque so its actually at maxtorque at 100% pedal travel
 //const float MIN_TORQUE = 0;
 //const float MAX_TORQUE = 0;
@@ -46,10 +49,12 @@ const uint16_t BSE_ADC_MIN_VAL = 371;
 const uint16_t BSE_ADC_MAX_VAL = 4085;
 
 
-const float APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 30;
+const float APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE = 10;
 const uint16_t APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
-const uint16_t BRAKE_ACTIVATED_ADC_VAL = 800;
+const uint16_t BSE_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
+
+const uint16_t BRAKE_ACTIVATED_ADC_VAL = 500;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;
 const uint16_t CROSS_CHECK_RESTORATION_APPS_PERCENT = 5;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
