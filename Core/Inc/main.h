@@ -95,6 +95,8 @@ void Error_Handler(void);
 #define CALIBRATE_PEDALS 1
 #define UNWELD_AIRS 2
 #define CAN_TEST 3
+#define DEBUG 4
+
 
 /* USER CODE END Private defines */
 

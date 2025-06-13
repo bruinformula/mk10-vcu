@@ -35,6 +35,7 @@
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
  * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, etc.
  * CAN_TEST : test can :skull:
+ * DEBUG : idfk you choose
 */
 const uint8_t VCUMODE = DRIVE;
 
@@ -55,15 +56,15 @@ const uint8_t VCUMODE = DRIVE;
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef struct {
-	int inverterActive;
-	int packVoltage;
-	int packCurrent;
+	uint8_t inverterActive;
+	uint16_t packVoltage;
+	uint16_t packCurrent;
 	// Add more fields as needed
 } BMSDiagnostics;  // The type alias is BMSDiagnostics
 
 typedef struct {
-	int motorRpm;
-	int inverterDCVolts;
+	uint16_t motorRpm;
+	uint16_t inverterDCVolts;
 	float carSpeed;
 	// Add more fields as needed
 } InverterDiagnostics;  // The type alias is InverterDiagnostics
@@ -98,6 +99,8 @@ uCAN_MSG rxMessage;
 uCAN_MSG diagMessage;
 uCAN_MSG fanMessage;
 
+//debug variable for pin state
+uint8_t pinState;
 
 
 // ADC readings
@@ -152,6 +155,8 @@ static const uint16_t *wavePCM = NULL; // pointer to PCM data in Flash
 static uint32_t halfwordCount  = 0; // total halfwords
 static uint8_t waveFinished    = 0; // flag if wave is finished
 
+volatile GPIO_PinState prechargeButtonState;
+volatile GPIO_PinState RTDButtonState;
 
 // customiABILTY shits
 const uint8_t BMS_TYPE = ORION_BMS;
@@ -320,7 +325,7 @@ void readFromCAN() {
 void updateBMSDiagnostics(void) {
 	// Pack_Current (signed 16-bit at bit 8, factor 0.1)
 
-	int16_t pack_current_raw = (int16_t)((rxMessage.frame.data0 << 8) | rxMessage.frame.data1);  // Little-endian
+	uint16_t pack_current_raw = (int16_t)((rxMessage.frame.data0 << 8) | rxMessage.frame.data1);  // Little-endian
 	float pack_current = pack_current_raw * 0.1f;
 
 	// Pack_Inst_Voltage (unsigned 16-bit at bit 24, factor 0.1)
@@ -611,19 +616,18 @@ void sendFanCommand(void) {
 
 	CANSPI_Transmit(&diagMessage);
 }
-uint8_t pinState;
 /**
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
  */
 void checkReadyToDrive(void) {
-	pinState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
+	RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	cpockandballs = HAL_GetTick() -millis_RTD;
-	if (pinState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
+	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
 	}
-	else if (pinState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+	else if (RTDButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
 	}
 	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
@@ -644,13 +648,13 @@ void sendPrechargeRequest(void){
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
-		uint8_t pinState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
+		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
 		if (BMS_TYPE == ORION_BMS) {
-			if(pinState == GPIO_PIN_SET && !prechargeState){
+			if(prechargeButtonState == GPIO_PIN_SET && !prechargeState){
 				prechargeState = true;
 				millis_precharge = HAL_GetTick();
 			}
-			else if (pinState == GPIO_PIN_RESET){
+			else if (prechargeButtonState == GPIO_PIN_RESET){
 				prechargeState = false;
 			}
 			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
@@ -916,7 +920,7 @@ void calibratePedalsMain(void) {
 }
 
 void CANTestHelperMain(void) {
-
+	while (1) {
 	txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	txMessage.frame.id = 0b10000000011;
 	txMessage.frame.dlc = 8;
@@ -953,6 +957,26 @@ void CANTestHelperMain(void) {
 		CANSPI_Transmit(&ppMesage);
 
 	}
+	}
+}
+
+
+
+void DebugMain(void) {
+	while (1) {
+		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
+		RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
+//		GPIO_PinState prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
+
+
+		if(dma_read_complete){
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+			dma_read_complete = 0;
+			millis_since_dma_read = HAL_GetTick();
+		}
+
+	}
+
 }
 
 //global debug variable
@@ -1039,6 +1063,10 @@ int main(void)
 
 	if (VCUMODE == CAN_TEST) {
 		CANTestHelperMain();
+	}
+
+	if (VCUMODE == DEBUG) {
+		DebugMain();
 	}
 
 	if (VCUMODE == DRIVE) {
@@ -1483,7 +1511,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : RTD_BTN_Pin */
   GPIO_InitStruct.Pin = RTD_BTN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(RTD_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
@@ -1496,7 +1524,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PRECHARGE_BTN_Pin */
   GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(PRECHARGE_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : CAN2_CS_Pin */

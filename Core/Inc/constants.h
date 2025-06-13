@@ -12,11 +12,22 @@ const uint16_t APPS1_RANK = 1;
 const uint16_t APPS2_RANK = 2;
 const uint16_t BSE_RANK = 3;
 
-const uint16_t APPS_1_ADC_MAX_VAL = 3116;
-const uint16_t APPS_1_ADC_MIN_VAL = 312;
+//const uint16_t APPS_1_ADC_MAX_VAL = 3116;
+//const uint16_t APPS_1_ADC_MIN_VAL = 312;
+//
+//const uint16_t APPS_2_ADC_MAX_VAL = 4095;
+//const uint16_t APPS_2_ADC_MIN_VAL = 409;
+
+const uint16_t APPS_1_ADC_MAX_VAL = 3108;
+const uint16_t APPS_1_ADC_MIN_VAL = 979;
 
 const uint16_t APPS_2_ADC_MAX_VAL = 4095;
-const uint16_t APPS_2_ADC_MIN_VAL = 409;
+const uint16_t APPS_2_ADC_MIN_VAL = 1657;
+//const uint16_t APPS_1_ADC_MAX_VAL = 3108;
+//const uint16_t APPS_1_ADC_MIN_VAL = 669;
+//
+//const uint16_t APPS_2_ADC_MAX_VAL = 4095;
+//const uint16_t APPS_2_ADC_MIN_VAL = 1248;
 
 //Nm
 const float MIN_TORQUE = -10;
@@ -58,9 +69,9 @@ const float TORQUE_ARRAY[10][10] = {
  	{4.0, 8.0, 12.0, 17.0, 21.0, 25.0, 29.0, 33.0, 45.0, 100.0},
  };
 
-const int RPM_READ_ID = 0x0A5;
-const int INVERTER_VOLTAGE_READ_ID = 0x0A7;
-const int BMS_DIAGNOSTICS_ID = 0x6B0;
+const int RPM_READ_ID = 165;
+const int INVERTER_VOLTAGE_READ_ID = 167;
+const int BMS_DIAGNOSTICS_ID = 1712;
 const int PRECHARGE_REQUEST_ID = 0x000;
 
 const int PRECHARGE_TIMEOUT_MS = 10000;
