@@ -37,7 +37,13 @@
  * CAN_TEST : test can :skull:
  * DEBUG : idfk you choose
 */
-#define VCUMODE CALIBRATE_PEDALS
+#define VCUMODE DRIVE
+
+
+/**
+ * one button RTD mode; press just the RTD button to both precharge and RTD when ready
+ */
+#define ONE_BUTTON_RTD_MODE_ENABLE 1
 
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
@@ -400,6 +406,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
 	millis_since_dma_read = HAL_GetTick();
 
+#if VCUMODE == CALIBRATE_PEDALS
 	if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
 	else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
 
@@ -408,16 +415,22 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
 	if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
 	else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+#endif
 
-	calculateTorqueRequest();
-	checkBSEPausibility();
-	checkAPPSPlausibility();
-	checkCrossCheck();
+	if (prechargeFinished && readyToDrive) {
+		calculateTorqueRequest();
+		checkBSEPausibility();
+		checkAPPSPlausibility();
+		checkCrossCheck();
 
 
-	finalTorqueRequest   = requestedTorque;
-	lastRequestedTorque  = requestedTorque;
-					dma_read_complete = 1;
+		finalTorqueRequest   = requestedTorque;
+		lastRequestedTorque  = requestedTorque;
+	} else {
+		finalTorqueRequest   = 0;
+	}
+
+	dma_read_complete = 1;
 	//			sendDebugTorqueCommand();
 	__enable_irq();
 
@@ -690,6 +703,7 @@ void sendFanCommand(void) {
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
  */
 void checkReadyToDrive(void) {
+#if ONE_BUTTON_RTD_MODE_ENABLE == 0
 	RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	cpockandballs = HAL_GetTick() -millis_RTD;
@@ -703,6 +717,23 @@ void checkReadyToDrive(void) {
 	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
+#else
+
+	if (!prechargeFinished || bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts >= 5) //precharge not finished yet
+		return;
+
+	//if precharge finished, wait a tiny little bit to make sure brake isn't just fake pressed and then RTD
+	if (bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive && prechargeFinished && !rtdState) {
+		rtdState = true;
+		millis_RTD = HAL_GetTick();
+	}
+	else if (bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+		rtdState = false;
+	}
+	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
+		readyToDrive = true;
+	}
+#endif
 }
 
 /**
@@ -711,6 +742,8 @@ void checkReadyToDrive(void) {
 
 void sendPrechargeRequest(void){
 
+	__enable_irq(); //make sure interrupts are enabled so i can dma read if i want
+
 	while(!prechargeFinished){
 		//			checkAPPSPlausibility();
 		//			checkCrossCheck();
@@ -718,7 +751,9 @@ void sendPrechargeRequest(void){
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
+#if ONE_BUTTON_RTD_MODE_ENABLE == 0
 		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
+
 		if (BMS_TYPE == ORION_BMS) {
 			if(prechargeButtonState == GPIO_PIN_SET && !prechargeState){
 				prechargeState = true;
@@ -728,12 +763,38 @@ void sendPrechargeRequest(void){
 				prechargeState = false;
 			}
 			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-				prechargeSequence();
-				prechargeFinished = true;
+				__disable_irq();
+				prechargeFinished = prechargeSequence();
+				__enable_irq();
 			}
 		} else if (BMS_TYPE == CUSTOM_BMS) {
 			while (1) {}
 		}
+#else
+		prechargeButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
+
+		/**
+		 * wait for button to be pressed AND brakes to be pressed, then disable interrupts (bc i dont need DMA reads while precharging)
+		 *
+		 */
+
+		if (BMS_TYPE == ORION_BMS) {
+			if(prechargeButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !prechargeState){
+				prechargeState = true;
+				millis_precharge = HAL_GetTick();
+			}
+			else if (prechargeButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL){
+				prechargeState = false;
+			}
+			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+				__disable_irq();
+				prechargeFinished = prechargeSequence();
+				__enable_irq();
+			}
+		} else if (BMS_TYPE == CUSTOM_BMS) {
+			while (1) {}
+		}
+#endif
 	}
 }
 
@@ -868,7 +929,6 @@ void lookForRTD(void) {
 		}
 
 		if(dma_read_complete){
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
 		}
@@ -1098,22 +1158,53 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+
+
+  /** TSSI GPIO handling. do this before everything else, moderately timing critical to prevent light from turning on
+   *
+   * BMSFaultState and IMDFaultState come from the SDCPCB and is normally high (faulted) due to a pull up internal
+   * to the VCU STM32 and an external 100k pullup to 12V on the SDCPCB, which is divided down to a 3V3 signal on the VCU.
+   *
+   * TSSI_LATCH, when pulled high, forces the TSSI green due to a small breakout board. This is rules-mandated behavior
+   * (not in the actual rules, part of a stupid FAQ because FSAE is retarded) Falstad: https://tinyurl.com/ywx84ed5
+   *
+   * This loop should default TSSI_LATCH high if it isn't already (it is), wait for BOTH IMD and BMS faults to clear,
+   * and then finally it will pull TSSI_LATCH low, thereby allowing the SDC to control the TSSI. It will only do this once,
+   * on car startup, because that's the only time that you want to override SDCPCB diagnostic information.
+   *
+   */
+  if (VCUMODE == DRIVE) {
+	  GPIO_PinState BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
+	  GPIO_PinState IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port, IMD_FAULT_Pin);
+
+	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_SET);
+
+	  while(BMSFaultState == GPIO_PIN_SET || IMDFaultState == GPIO_PIN_SET) {
+		  BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
+		  IMDFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
+		  HAL_Delay(10);
+	  }
+
+	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);
+  }
 	// Start TIM4
 	//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-  //start tim3 for dma reads
+
+  	  //start tim3; generates interrupts for DMA reads. configure ONLY in IOC file
   	HAL_TIM_Base_Start(&htim3);
 
 	//start DMA
 	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
 
-
+#if VCUMODE == CALIBRATE_PEDALS
 	APPS1Bounds.min = 4096;
 		APPS1Bounds.max = 0;
 		APPS2Bounds.min = 4096;
 		APPS2Bounds.max = 0;
 		BSEBounds.min = 4096;
 		BSEBounds.max = 0;
+#endif
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
 //	if (CANSPI_Initialize() != true) {
 //		Error_Handler();
@@ -1412,7 +1503,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 500;
+  htim3.Init.Period = 1000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -1534,13 +1625,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, TSSI_LATCH_Pin|GPIO_PIN_1, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : LED1_Pin */
   GPIO_InitStruct.Pin = LED1_Pin;
@@ -1578,18 +1666,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pins : TSSI_LATCH_Pin PB1 */
+  GPIO_InitStruct.Pin = TSSI_LATCH_Pin|GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : RTD_BTN_Pin */
-  GPIO_InitStruct.Pin = RTD_BTN_Pin;
+  /*Configure GPIO pins : RTD_BTN_Pin IMD_FAULT_Pin BMS_FAULT_Pin */
+  GPIO_InitStruct.Pin = RTD_BTN_Pin|IMD_FAULT_Pin|BMS_FAULT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(RTD_BTN_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
   GPIO_InitStruct.Pin = PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin;
@@ -1617,12 +1705,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB4 PB5 PB6 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  /*Configure GPIO pin : BSPD_FAULT_Pin */
+  GPIO_InitStruct.Pin = BSPD_FAULT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BSPD_FAULT_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

@@ -69,6 +69,8 @@ void Error_Handler(void);
 #define CAN2_RESET_GPIO_Port GPIOC
 #define LED2_Pin GPIO_PIN_5
 #define LED2_GPIO_Port GPIOA
+#define TSSI_LATCH_Pin GPIO_PIN_0
+#define TSSI_LATCH_GPIO_Port GPIOB
 #define RTD_BTN_Pin GPIO_PIN_2
 #define RTD_BTN_GPIO_Port GPIOB
 #define PCHG_RLY_CTRL_Pin GPIO_PIN_7
@@ -89,6 +91,12 @@ void Error_Handler(void);
 #define SHUTDOWN_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define IMD_FAULT_Pin GPIO_PIN_4
+#define IMD_FAULT_GPIO_Port GPIOB
+#define BMS_FAULT_Pin GPIO_PIN_5
+#define BMS_FAULT_GPIO_Port GPIOB
+#define BSPD_FAULT_Pin GPIO_PIN_6
+#define BSPD_FAULT_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 #define DRIVE 0
