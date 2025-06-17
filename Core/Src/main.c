@@ -803,7 +803,7 @@ void sendFanCommand(void) {
 		fanMessage.frame.data1 = 0x00;
 	}
 
-	CANSPI_Transmit(&diagMessage);
+	CANSPI_Transmit(&fanMessage);
 }
 /**
  * @brief Check if the driver has pressed the brake pedal and the RTD pin is set.
@@ -829,15 +829,21 @@ void checkReadyToDrive(void) {
 		return;
 
 	//if precharge finished, wait a tiny little bit to make sure brake isn't just fake pressed and then RTD
-	if (bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive && prechargeFinished && !rtdState) {
+	if (HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin) == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive && prechargeFinished && !rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
 	}
-	else if (bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+	else if (HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin) == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
+		RTDButtonPressedDuration = 0;
 	}
-	else if(RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
-		readyToDrive = true;
+	if (rtdState) {		// button still acknowledged
+	    RTDButtonPressedDuration = HAL_GetTick() - millis_RTD;
+	    if (RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
+	        readyToDrive = true;	// ready only if still held
+	    }
+	} else {
+	    RTDButtonPressedDuration = 0;	// reset after release
 	}
 #endif
 }
@@ -1060,6 +1066,7 @@ void lookForRTD(void) {
 
 		//add check for make sure apps are 0 travel
 
+		ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 		while (ballsandcock == GPIO_PIN_RESET) {
 			ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 			HAL_Delay(5);
@@ -1308,7 +1315,7 @@ int main(void)
 
 	  while(BMSFaultState == GPIO_PIN_SET || IMDFaultState == GPIO_PIN_SET) {
 		  BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
-		  IMDFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
+		  IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port, IMD_FAULT_Pin);
 		  HAL_Delay(10);
 	  }
 
@@ -1333,9 +1340,9 @@ int main(void)
 		BSEBounds.max = 0;
 #endif
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
-//	if (CANSPI_Initialize() != true) {
-//		Error_Handler();
-//	}
+	if (CANSPI_Initialize() != true) {
+		Error_Handler();
+	}
 
 	// Initialize some diagnostics values
 	//	bms_diagnostics.inverterActive = 1;
