@@ -45,6 +45,9 @@
  */
 #define ONE_BUTTON_RTD_MODE_ENABLE 1
 
+//set this to 1 to override RTD and immediately send torque requests. NEVER DO THIS.
+uint8_t rtdoverride = 0;
+
 
 //--- BEGIN WAV PLAYBACK DEFINES ---//
 #include "startup_sound.h"  // Contains 'startup_sound' array and 'startup_sound_len'
@@ -99,82 +102,123 @@ TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
 
-// CAN messages
+/* **** CAN MESSAGES **** */
+//message that only stores torque requests. ID 0x0C0
 uCAN_MSG torqueRequestMessage;
+//message that only stores received data. can be whatever
 uCAN_MSG rxMessage;
+//DIAGNOSTIC message. ID 0x500; not received by anything
 uCAN_MSG diagMessage;
+//message to orion bms to turn on fans. NOT EVER USED
 uCAN_MSG fanMessage;
 
-//debug variable for pin state
-uint8_t pinState;
-
-//apps reads per 100ms; counter and actual value
+#if VCUMODE == CALIBRATE_PEDALS
+/* **** APPS READS PER SECOND COUNTERS, FOR DIAGNOSTIC PURPOSES **** */
+//counter for APPS reads per 100ms. gets reset every 100ms
 uint16_t readsPer100msCounter = 0;
+//actual APPS reads per 100ms. not really sure why this also exists in addition to above variable
 uint16_t readsPer100ms = 0;
-
-//current tick, update whenever u want a value
+//current tick, update whenever u want a value. only used in calculating APPS reads every 100ms. for debug purposes
 uint32_t currtick = 0;
 
-
-
-// ADC readings
-volatile uint32_t apps1Value = 0;
-volatile uint32_t apps2Value = 0;
-volatile uint32_t bseValue   = 0;
-
-//apps bounds
+/* **** STRUCTS TO STORE THE MAX AND MIN FOR PEDAL ANALOG READS. FOR DEBUG AND CALIBRATION PURPOSES. ONLY USED IN CALIBRATE_PEDALS **** */
+//definition of a pedalbounds struct type
 typedef struct {
 	uint32_t min;
 	uint32_t max;
 } PedalBounds;
+//struct to store max and min of APPS1
 PedalBounds APPS1Bounds;
+//struct to store max and min of APPS2
 PedalBounds APPS2Bounds;
+//struct to store max and min of the BSE
 PedalBounds BSEBounds;
+#endif
 
-// Torque variables
-uint32_t apps1Buffer[ADC_READ_BUFFER] = {0};
-uint32_t apps2Buffer[ADC_READ_BUFFER] = {0};
-uint32_t bseBuffer[ADC_READ_BUFFER]   = {0};
-uint8_t adcBufferIndex = 0;
 
-float requestedTorque;
-float lastRequestedTorque = 0;
-float finalTorqueRequest;
-uint8_t beginTorqueRequests = false;
-
-// APPS plausibility
-uint16_t apps_plausible = true;
-uint32_t millis_since_apps_implausible;
+/* **** GLOBAL VARIABLES TO READ AND STORE RAW ADC COUNTS OF PEDAL SENSORS **** */
+//buffer array that stores the raw analog reads of the pedals. not to be edited by user, only by the HAL when conducting a DMA read
+uint32_t ADC_Reads[ADC_BUFFER];
+//raw analog counts of apps1
+volatile uint32_t apps1Value = 0;
+//raw analog counts of apps2
+volatile uint32_t apps2Value = 0;
+//raw analog counts of the BSE
+volatile uint32_t bseValue   = 0;
+//callback variable to tell main method that a DMA transfer has finished. no longer used to call various methods in the main methods
 uint8_t  dma_read_complete = 1;
+//time since the last DMA read
 uint32_t millis_since_dma_read = 0;
 
-// BSE plausibility
+/* **** GLOBAL BUFFERS FOR EACH APPS. USED TO COMPUTE MEDIAN FILTER **** */
+//raw analog counts buffer of apps1
+uint32_t apps1Buffer[ADC_READ_BUFFER] = {0};
+//raw analog counts buffer of apps2
+uint32_t apps2Buffer[ADC_READ_BUFFER] = {0};
+//raw analog counts buffer of the BSE
+uint32_t bseBuffer[ADC_READ_BUFFER]   = {0};
+//where in the pedal filtering buffer (which moves circularly) the next read should go
+uint8_t adcBufferIndex = 0;
+
+
+/* **** VARIABLES TO STORE TORQUE REQUESTS **** */
+//requested torque. value here is still in progress to be sent
+float requestedTorque = 0;
+//previous final torque request. i.e. what was in finalTorqueRequest one CAN frame ago
+float lastRequestedTorque = 0;
+//the torque request that actually gets sent to the inverter
+float finalTorqueRequest = 0;
+//lockout variable. 0 if not yet requesting torque (booting up, booting down), 1 if requesting torque (normal drive mode)
+uint8_t beginTorqueRequests = false;
+
+/* **** VARIABLES TO STORE PLAUSIBILITY STATUS OF VARIOUS CHECKS; APPS plausibility (T.4.2), BSE plausibility (T.4.3), Crosscheck (EV.4.7)**** */
+//APPS plausibility status. does NOT directly mean that torque requests are 0. is 0 if pedal travel % deviation is over APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE
+uint16_t apps_plausible = true;
+//the time that the APPS last went implausible. if the difference between this and HAL_GetTick() is less
+//than APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS, then torque requests will be 0.
+uint32_t millis_since_apps_implausible;
+// BSE plausibility status. does NOT directly mean that torque requests are 0. is 0 if BSE out of range
 uint16_t bse_plausible = true;
+//the time that the BSE last went implausible. if the difference between this and HAL_GetTick() is less
+//than BSE_IMPLAUSIBILITY_TIMEOUT_MILLIS, then torque requests will be 0.
 uint32_t millis_since_bse_implausible;
-
-
-// Cross-check plausibility
+// Cross-check plausibility. if
 uint16_t cross_check_plausible = true;
 
-// ADC buffer
-uint32_t ADC_Reads[ADC_BUFFER];
 
-// Temp variables for display or logic
+/* **** VARIABLES TO STORE PEDAL TRAVELS AS A PERCENTAGE, USED TO CALCULATE PLAUSIBILITY CHECKS **** */
+//apps 1 pedal travel represented as a %
 float apps1_as_percent = 0;
+//apps 2 pedal travel represented as a %
 float apps2_as_percent = 0;
+//brake pedal travel represented as a %
 float bse_as_percent = 0;
 
-// startup logic global variables
+/* **** GLOBAL VARIABLES THAT STORE VARIOUS STARTUP LOGIC PARAMETERS **** */
+//if car is ready to drive; precharged, driver consented, SDC closed, etc.
 uint8_t readyToDrive = false;
+//temporary variable that is 1 if just waiting for a lonng enough button press on the RTD button
 uint8_t rtdState = false;
-uint32_t cpockandballs;
+//duration that the RTD button has been pressed
+uint32_t RTDButtonPressedDuration;
+//the time, in ms, that the RTD button last got pressed
 uint32_t millis_RTD;
+//similar to rtdState, temporary variable that is 1 if just waiting for a lonng enough button press on
+//precharge button (ONE_BUTTON_RTD_MODE_ENABLE == 0) or RTD button (ONE_BUTTON_RTD_MODE_ENABLE == 1)
 uint8_t prechargeState = false;
+//if precharge has been finished
 uint8_t prechargeFinished = false;
+//the time, in ms, that the precharge (ONE_BUTTON_RTD_MODE_ENABLE == 0) or RTD (ONE_BUTTON_RTD_MODE_ENABLE == 1) button last got pressed
 uint32_t millis_precharge;
+//current state of the precharge button
+volatile GPIO_PinState prechargeButtonState;
+//current state of the RTD button
+volatile GPIO_PinState RTDButtonState;
 
-// Diagnostics structures
+/* **** DIAGNOSTIC STRUCTURES **** */
+//diagnostics coming from BMS
 BMSDiagnostics      bms_diagnostics;
+//diagnostics coming from inverter
 InverterDiagnostics inverter_diagnostics;
 
 // WAV Playback Variables
@@ -183,11 +227,10 @@ static const uint16_t *wavePCM = NULL; // pointer to PCM data in Flash
 static uint32_t halfwordCount  = 0; // total halfwords
 static uint8_t waveFinished    = 0; // flag if wave is finished
 
-volatile GPIO_PinState prechargeButtonState;
-volatile GPIO_PinState RTDButtonState;
 
-// customiABILTY shits
-const uint8_t BMS_TYPE = ORION_BMS;
+
+
+#define BMS_TYPE ORION_BMS
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -220,6 +263,13 @@ void lookForRTD(void);
 void AIRUnweldHelper(void);
 
 void calibratePedalsMain(void);
+
+/**
+ * debug variable for pin state, can write to this variable wherever but be careful
+ * you dont use it multiple times
+ */
+uint8_t pinState;
+//no fucking idea what this is for, probably some debug variable
 uint32_t penispenispenis;
 
 /* USER CODE END PFP */
@@ -227,6 +277,13 @@ uint32_t penispenispenis;
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/**
+ * send diagnostic message
+ *
+ * documented in CAN protocol here
+ *
+ * https://bruinformularacing.notion.site/Mk-X-CAN-Protocol-2a6f5a22087347e2a02a4793251fd920?p=1ec9c37d88d98099827feb0cf37ad6e8&pm=s
+ */
 void sendDiagMsg(void) {
 
 	char msg0 = ((int)(inverter_diagnostics.carSpeed * 100) ) & 0xff;
@@ -236,7 +293,7 @@ void sendDiagMsg(void) {
 	diagMessage.frame.data1 = msg1;
 
 
-	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
+	int torqueValue = (int) (finalTorqueRequest * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
 	msg0 = torqueValue & 0xFF;
@@ -261,10 +318,16 @@ void sendDiagMsg(void) {
 	CANSPI_Transmit(&diagMessage);
 }
 
+/**
+ * ngl bro idk why this exists i didnt write it
+ */
 int compare_uint32_t(const void *a, const void *b) {
 	return (*(uint32_t*)a - *(uint32_t*)b);
 }
 
+/**
+ * @brief median filter for APPS reading
+ */
 uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
 	uint32_t temp[ADC_READ_BUFFER];
 	memcpy(temp, buffer, size * sizeof(uint32_t));
@@ -277,27 +340,24 @@ uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
  */
 void checkShutdown(){
 	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
-	//	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00111110;
-	sendDiagMsg();
+
 	if (pinState == GPIO_PIN_RESET) {
-
+		//disable interrupts so there's no distractions
+		__disable_irq();
+		//i mean, torque isn't possible to be had, but still send 0 torque request
 		requestedTorque = 0;
-
 		sendTorqueCommand();
-		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+
+		//toggle airs off. first disconnect hot end for safety, then cascade with the rest
+		//5ms delays to avoid any weird timing things
+		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //turn off air+
 		HAL_Delay(5);
-		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //turn off air-
 		HAL_Delay(5);
-		HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
+		HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET); //turn off precharge relay
 		HAL_Delay(5);
 
-		readyToDrive = false;
-
-		prechargeState = false;
-		rtdState = false;
-		prechargeFinished = false;
-		cpockandballs = 0;
-
+		//disable inverter
 		for (int i = 0; i < 3; i++) {
 			torqueRequestMessage.frame.data0 = 0;
 			torqueRequestMessage.frame.data1 = 0;
@@ -310,13 +370,30 @@ void checkShutdown(){
 			CANSPI_Transmit(&torqueRequestMessage);
 		}
 
+		//send diagnostic message. reset SDC, AIRS, Precharge, RTD, looking for RTD bits
+		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
+		sendDiagMsg();
+
+		//reset all relevant variables for reenergization
+		readyToDrive = false;
+		prechargeState = false;
+		rtdState = false;
+		prechargeFinished = false;
+		RTDButtonPressedDuration = 0;
+
+
+
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
 		sendDiagMsg();
 
 		HAL_Delay(5000);
 
+		__enable_irq();
 		//		lookForRTD();
 	}
+	//just set the SDC bit, don't bother with others
+	diagMessage.frame.data7 = diagMessage.frame.data7 | 0b10000000;
+	sendDiagMsg();
 }
 
 /**
@@ -347,6 +424,8 @@ void readFromCAN() {
 
 /**
  * @brief Parse BMS diagnostics from a received CAN message
+ *
+ * yea thats pretty much it... kinda braindead
  */
 void updateBMSDiagnostics(void) {
 	// Pack_Current (signed 16-bit at bit 8, factor 0.1)
@@ -438,7 +517,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
 
 /**
- * @brief Calculate the requested torque based on APPS and RPM, or regen based on BSE.
+ * @brief Calculate the requested torque based on APPS and RPM, or regen based on BSE. this one uses actual pedal mapping
+ * but was never tested, so keep this commented out or delete it, i (tony) just kept it here because i wanted to keep it in one place
  */
 
 //void calculateTorqueRequest(void)
@@ -487,6 +567,17 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 //}
 volatile float appsValue;
 
+/**
+ * @brief calculate torque request using one-pedal driving control scheme
+ *
+ * Three important points; max regenerative torque @ X pedal travel, 0 torque at Y pedal travel, and max torque at Z pedal travel
+ * max regenerative torque is at 0 mechanical pedal travel
+ * 0 torque is at APPS_INFLECTION_PERCENT (5%, as of 6/16/25 to give drivers a little more control in the acceleration range,
+ *     where pedal resolution matters more) mechanical pedal travel
+*  max torque is at 100% mechanical pedal travel
+*
+*  this function linearly interpolates between the three points based on pedal travel percentage.
+ */
 void calculateTorqueRequest(void)
 {
 	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
@@ -513,6 +604,11 @@ void calculateTorqueRequest(void)
 
 /**
  * @brief Check plausibility of APPS sensors.
+ * sorry for the shitty ass variable naming, paininmyass is just the % difference in travel between the pedals
+ *
+ * some redundancy built in; for some reason it really didnt like to just be stable and woudl randomly jump values
+ * from the expected 0 to like -70nm, even with the median filter, so instead of adding extra latency to every input
+ * i just reject everythign that doesn't fit the bill and use last normal ass value
  */
 float paininmyass = 0.0;
 void checkAPPSPlausibility(void) {
@@ -522,7 +618,6 @@ void checkAPPSPlausibility(void) {
 			/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
 
 	paininmyass = fabsf(fabsf(apps1_as_percent) - fabsf(apps2_as_percent));
-	currtick = HAL_GetTick();
 	if (paininmyass > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		if (apps_plausible)
 			millis_since_apps_implausible = HAL_GetTick(); //only grab the tick if it switched
@@ -608,7 +703,7 @@ void checkCrossCheck(void)
 }
 
 /**
- * @brief Send the torque command message over CAN.
+ * @brief Send the torque command message over CAN. also provide final checks to ensure no stupid torque requests
  */
 void sendTorqueCommand(void) {
 
@@ -645,7 +740,12 @@ void sendTorqueCommand(void) {
 	CANSPI_Transmit(&torqueRequestMessage);
 }
 
-
+#if VCUMODE == CALIBRATE_PEDALS
+/**
+ * DEBUG USE ONLY; WILL ONLY BE CALLED WHEN IN VCUMODE CALIBRATE_PEDALS. 0x5XX is VCU debug, 0x5C0 is fake torque messages.
+ *
+ * should probably just use #if directive shits to change the ID isntead of everything lowkey
+ */
 void sendDebugTorqueCommand(void) {
 
 	if (requestedTorque >= MAX_TORQUE) {
@@ -682,9 +782,13 @@ void sendDebugTorqueCommand(void) {
 
 	CANSPI_Transmit(&torqueRequestMessage);
 }
+#endif
 
-
-
+/**
+ * 6/16/25 NOT USED
+ *
+ * supposed to send a command over CAN to the orion BMS to start the fans, never got it working
+ */
 void sendFanCommand(void) {
 	fanMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 	fanMessage.frame.id = 0x501;
@@ -706,7 +810,7 @@ void checkReadyToDrive(void) {
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 	RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
-	cpockandballs = HAL_GetTick() -millis_RTD;
+	RTDButtonPressedDuration = HAL_GetTick() -millis_RTD;
 	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
@@ -714,7 +818,7 @@ void checkReadyToDrive(void) {
 	else if (RTDButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
 	}
-	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
+	else if(RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
 #else
@@ -730,7 +834,7 @@ void checkReadyToDrive(void) {
 	else if (bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
 		rtdState = false;
 	}
-	else if(cpockandballs >= RTD_BUTTON_PRESS_MILLIS){
+	else if(RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
 #endif
@@ -754,22 +858,24 @@ void sendPrechargeRequest(void){
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
 
-		if (BMS_TYPE == ORION_BMS) {
-			if(prechargeButtonState == GPIO_PIN_SET && !prechargeState){
-				prechargeState = true;
-				millis_precharge = HAL_GetTick();
-			}
-			else if (prechargeButtonState == GPIO_PIN_RESET){
-				prechargeState = false;
-			}
-			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-				__disable_irq();
-				prechargeFinished = prechargeSequence();
-				__enable_irq();
-			}
-		} else if (BMS_TYPE == CUSTOM_BMS) {
-			while (1) {}
+#if BMS_TYPE == ORION_BMS
+		if(prechargeButtonState == GPIO_PIN_SET && !prechargeState){
+			prechargeState = true;
+			millis_precharge = HAL_GetTick();
 		}
+		else if (prechargeButtonState == GPIO_PIN_RESET){
+			prechargeState = false;
+		}
+		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+			__disable_irq();
+			prechargeFinished = prechargeSequence();
+			__enable_irq();
+		}
+#elif BMS_TYPE == CUSTOM_BMS
+		while (1) {}
+#endif
+
+
 #else
 		prechargeButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 
@@ -778,22 +884,22 @@ void sendPrechargeRequest(void){
 		 *
 		 */
 
-		if (BMS_TYPE == ORION_BMS) {
-			if(prechargeButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !prechargeState){
-				prechargeState = true;
-				millis_precharge = HAL_GetTick();
-			}
-			else if (prechargeButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL){
-				prechargeState = false;
-			}
-			else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-				__disable_irq();
-				prechargeFinished = prechargeSequence();
-				__enable_irq();
-			}
-		} else if (BMS_TYPE == CUSTOM_BMS) {
-			while (1) {}
+#if BMS_TYPE == ORION_BMS
+		if(prechargeButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !prechargeState){
+			prechargeState = true;
+			millis_precharge = HAL_GetTick();
 		}
+		else if (prechargeButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL){
+			prechargeState = false;
+		}
+		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
+			__disable_irq();
+			prechargeFinished = prechargeSequence();
+			__enable_irq();
+		}
+#elif BMS_TYPE == CUSTOM_BMS
+		while (1) {}
+#endif
 #endif
 	}
 }
@@ -809,6 +915,8 @@ void sendPrechargeRequest(void){
  * 4.5) if prechg is unsuccessful, open neg air and precharge and error and infinite loop
  *
  * return returns 1 if precharge successful, infinite loop if it doesn't work
+ *
+ * precharge is done with interrupts OFF (6.16.25)
  */
 
 uint32_t startPrechargeTime = 0;
@@ -816,17 +924,24 @@ uint32_t penis = 0;
 uint8_t prechargeSequence(void){
 	startPrechargeTime = HAL_GetTick();
 
+	//deep breath before starting lmao
 	HAL_Delay(10);
 
+	//send the diagnostic message with updated AIR states
 	diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00110000;
 	sendDiagMsg();
 
+	//close negative AIR and precharge relay
 	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 	HAL_Delay(3);
 	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
+	HAL_Delay(3);
 	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 
+	// penis is just the time since precharge was started
 	penis = HAL_GetTick() - startPrechargeTime;
+
+	//timeout if precharge has taken longer than PRECHARGE_TIMEOUT_MS or if the SDC opens in between
 	while (penis < PRECHARGE_TIMEOUT_MS && HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin) == GPIO_PIN_SET) { //loop for 4
 
 		//get inverter & BMS can data
@@ -850,16 +965,18 @@ uint8_t prechargeSequence(void){
 		sendDiagMsg();
 	}
 
-	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
-	HAL_Delay(5);
-	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
-	HAL_Delay(5);
-	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET);
-	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b11000111;
-	sendDiagMsg();
-	HAL_Delay(5000);
-	prechargeState = false;
-	prechargeFinished = false;
+	/** UNTESTED WEIRD CHANGE: just checkShutdown (should trigger the system reset) isntead of doing it again **/
+	checkShutdown();
+//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+//	HAL_Delay(5);
+//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
+//	HAL_Delay(5);
+//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET);
+//	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b11000111;
+//	sendDiagMsg();
+//	HAL_Delay(5000);
+//	prechargeState = false;
+//	prechargeFinished = false;
 	return 0;
 }
 
@@ -868,6 +985,9 @@ uint8_t prechargeSequence(void){
 //-----------------------------------------------
 /**
  * @brief Called by HAL when a DMA transmission completes (for one chunk).
+ * gang i have no idea how this shit works and i don't feel like figuring it out
+ *
+ * all i know is that it streams data from flash to i2s word by word
  */
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
 	if (hi2s->Instance == SPI2 && !waveFinished) {
@@ -892,6 +1012,8 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
 
 /**
  * @brief Play the startup sound from Flash exactly once.
+ *
+ * if you still dont know what this method does dawg idfk what to tell u
  */
 void PlayStartupSoundOnce(void) {
 	wavePCM = (const uint16_t*)(&startup_sound[WAV_HEADER_SIZE]);
@@ -910,7 +1032,6 @@ void PlayStartupSoundOnce(void) {
 	HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*)chunkPtr, thisChunk);
 }
 
-uint8_t rtdoverride = 0;
 
 GPIO_PinState ballsandcock;
 void lookForRTD(void) {
@@ -1002,7 +1123,7 @@ void AIRUnweldHelper(void) {
 	}
 }
 
-
+#if VCUMODE == CALIBRATE_PEDALS
 uint32_t lastCalcReadsPerSecTime = 0;
 void calibratePedalsMain(void) {
 //	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
@@ -1056,6 +1177,7 @@ void calibratePedalsMain(void) {
 
 	}
 }
+#endif
 
 void CANTestHelperMain(void) {
 	while (1) {

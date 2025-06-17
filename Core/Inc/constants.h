@@ -30,7 +30,7 @@ const uint16_t APPS_2_ADC_MAX_VAL = 3812;
 const uint16_t APPS_2_ADC_MIN_VAL = 1217;
 
 
-const float APPS_INFLECTION_PERCENT = 0.1;
+const float APPS_INFLECTION_PERCENT = 0.05;
 
 //Nm
 const float MIN_TORQUE = 0;
