@@ -256,7 +256,7 @@ void checkReadyToDrive(void);
 void sendTorqueCommand(void);
 void sendPrechargeRequest(void);
 uint8_t prechargeSequence(void);
-void checkShutdown(void);
+uint8_t checkShutdown(void);
 void PlayStartupSoundOnce(void);
 void updateInverterVolts(void);
 void lookForRTD(void);
@@ -338,7 +338,7 @@ uint32_t median_uint32_t(uint32_t *buffer, uint8_t size) {
 /**
  * @brief  Check the shutdown pin; if high, set torque to 0 and block forever.
  */
-void checkShutdown(){
+uint8_t checkShutdown(){
 	uint8_t pinState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 
 	if (pinState == GPIO_PIN_RESET) {
@@ -389,11 +389,13 @@ void checkShutdown(){
 		HAL_Delay(5000);
 
 		__enable_irq();
+		return false;
 		//		lookForRTD();
 	}
 	//just set the SDC bit, don't bother with others
 	diagMessage.frame.data7 = diagMessage.frame.data7 | 0b10000000;
 	sendDiagMsg();
+	return true;
 }
 
 /**
@@ -885,6 +887,8 @@ void sendPrechargeRequest(void){
 		 */
 
 #if BMS_TYPE == ORION_BMS
+
+		if (!checkShutdown) return; //if shutdown circuit opens, stop sending a precharge request and go back to waiting for SDC to close
 		if(prechargeButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !prechargeState){
 			prechargeState = true;
 			millis_precharge = HAL_GetTick();
@@ -1055,10 +1059,11 @@ void lookForRTD(void) {
 		}
 
 		//add check for make sure apps are 0 travel
-		ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
-		//		while (ballsandcock == GPIO_PIN_RESET) {
-		//		  HAL_Delay(1);
-		//	  }
+
+		while (ballsandcock == GPIO_PIN_RESET) {
+			ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+			HAL_Delay(5);
+		}
 
 
 
