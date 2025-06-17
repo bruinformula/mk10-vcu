@@ -35,7 +35,7 @@
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
  * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, readsPer100ms, etc.
  * CAN_TEST : test can :skull:
- * DEBUG : idfk you choose
+ * VCUMODE_DEBUG : idfk you choose
 */
 #define VCUMODE DRIVE
 
@@ -888,7 +888,7 @@ void sendPrechargeRequest(void){
 
 #if BMS_TYPE == ORION_BMS
 
-		if (!checkShutdown) return; //if shutdown circuit opens, stop sending a precharge request and go back to waiting for SDC to close
+		if (!checkShutdown()) return; //if shutdown circuit opens, stop sending a precharge request and go back to waiting for SDC to close
 		if(prechargeButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !prechargeState){
 			prechargeState = true;
 			millis_precharge = HAL_GetTick();
