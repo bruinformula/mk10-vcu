@@ -1336,7 +1336,6 @@ int main(void)
 	  }
 
 	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);*/
-  }
 	// Start TIM4
 	//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
 
