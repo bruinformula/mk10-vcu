@@ -1312,6 +1312,22 @@ int main(void)
 	  GPIO_PinState IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port, IMD_FAULT_Pin);
 
 	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_SET);
+	  HAL_Delay(10);
+	  uint32_t start = HAL_GetTick();
+	  while ((HAL_GetTick() - start) < 30000) {
+		  BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
+		  IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port, IMD_FAULT_Pin);
+
+		 if (BMSFaultState == GPIO_PIN_RESET && IMDFaultState == GPIO_PIN_RESET) {
+			 break;
+		 }
+		 HAL_Delay(10);
+	  }
+
+	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);
+  }
+
+	  /*
 
 	  while(BMSFaultState == GPIO_PIN_SET || IMDFaultState == GPIO_PIN_SET) {
 		  BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
@@ -1319,7 +1335,7 @@ int main(void)
 		  HAL_Delay(10);
 	  }
 
-	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);*/
   }
 	// Start TIM4
 	//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
