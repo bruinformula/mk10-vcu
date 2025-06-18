@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "CANSPI.h"
 #include "constants.h"
@@ -339,6 +340,8 @@ uint8_t checkShutdown() {
 
 		//toggle airs off. first disconnect hot end for safety, then cascade with the rest
 		//5ms delays to avoid any weird timing things
+
+		// Can keep this in as toggling AIRs will not do anything w/ Accumulator disconnected
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //turn off air+
 		HAL_Delay(5);
 		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //turn off air-
@@ -364,11 +367,13 @@ uint8_t checkShutdown() {
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
 		sendDiagMsg();
 
-		//reset all relevant variables for reenergization
+		//reset all relevant variables for re-energization
 		readyToDrive = false;
 		prechargeState = false;
 		rtdState = false;
+
 		prechargeFinished = false;
+
 		RTDButtonPressedDuration = 0;
 
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
@@ -692,6 +697,7 @@ void checkCrossCheck(void) {
  * @brief Send the torque command message over CAN. also provide final checks to ensure no stupid torque requests
  */
 void sendTorqueCommand(void) {
+	// Test later for plausibility & crosscheck
 
 	if (finalTorqueRequest >= MAX_TORQUE) {
 		finalTorqueRequest = MAX_TORQUE;
@@ -796,17 +802,28 @@ void checkReadyToDrive(void) {
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 	RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
 	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
-	RTDButtonPressedDuration = HAL_GetTick() -millis_RTD;
-	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
+	RTDButtonPressedDuration = HAL_GetTick() - millis_RTD;
+
+//	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
+//		rtdState = true;
+//		millis_RTD = HAL_GetTick();
+//	}
+//	else if (RTDButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+//		rtdState = false;
+//	}
+
+	// We removed checks for seeing if the inverter is active, just kept normal checks for RTD Button & BSE Value
+	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && !rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
-	}
-	else if (RTDButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL || !bms_diagnostics.inverterActive ){
+	} else if (RTDButtonState == GPIO_PIN_RESET || bseValue < BRAKE_ACTIVATED_ADC_VAL) {
 		rtdState = false;
 	}
 	else if(RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
+
+// DOES NOT GO HERE!!!!! for our mode (since ONE_BUTTON_RTD_MODE_ENABLE is 0)
 #else
 
 	if (!prechargeFinished
@@ -853,6 +870,8 @@ void sendPrechargeRequest(void) {
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
+
+
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
 
@@ -903,7 +922,7 @@ void sendPrechargeRequest(void) {
 		while (1) {}
 #endif
 #endif
-	}
+	} // While Loop end brace
 }
 
 /**
@@ -953,8 +972,8 @@ uint8_t prechargeSequence(void) {
 			readFromCAN();
 		}
 
-		if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts
-				< PRECHARGE_VOLTAGE_DIFF && bms_diagnostics.packVoltage > 10) {
+//		if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts
+//				< PRECHARGE_VOLTAGE_DIFF && bms_diagnostics.packVoltage > 10) {
 
 			HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin,
 					GPIO_PIN_SET); //step 4
@@ -962,12 +981,14 @@ uint8_t prechargeSequence(void) {
 			HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin,
 					GPIO_PIN_RESET);
 			prechargeFinished = true;
-			penispenispenis = bms_diagnostics.packVoltage
-					- inverter_diagnostics.inverterDCVolts;
+//			penispenispenis = bms_diagnostics.packVoltage
+//					- inverter_diagnostics.inverterDCVolts;
+			// NOTE: bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts is the "DELTA"
+			// penispenispenis is used as a live expressions debugging variable, reused in RTD
 			diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00011000;
 			sendDiagMsg();
 			return 1;
-		}
+//		}
 
 		penis = HAL_GetTick() - startPrechargeTime;
 		sendDiagMsg();
@@ -1039,7 +1060,7 @@ void PlayStartupSoundOnce(void) {
 	HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*) chunkPtr, thisChunk);
 }
 
-GPIO_PinState ballsandcock;
+GPIO_PinState shutdownState;
 void lookForRTD(void) {
 	if (rtdoverride == 1) {
 		beginTorqueRequests = true;
@@ -1060,9 +1081,9 @@ void lookForRTD(void) {
 
 		//add check for make sure apps are 0 travel
 
-		ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
-		while (ballsandcock == GPIO_PIN_RESET) {
-			ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+		shutdownState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+		while (shutdownState == GPIO_PIN_RESET) {
+			shutdownState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 			HAL_Delay(5);
 		}
 
@@ -1304,6 +1325,7 @@ int main(void) {
 		HAL_Delay(10);
 		uint32_t start = HAL_GetTick();
 		while ((HAL_GetTick() - start) < 30000) {
+			// Need to spoof BMS & IMD Fault State on Shutdown, leave these GPIO Checks in code
 			BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port,
 					BMS_FAULT_Pin);
 			IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port,
@@ -1413,7 +1435,6 @@ int main(void) {
 			}
 
 			updateBMSDiagnostics();
-
 			sendDiagMsg();
 			// ... do other tasks as needed ...
 		}
