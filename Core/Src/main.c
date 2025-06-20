@@ -1266,7 +1266,8 @@ void DebugMain(void) {
   * @brief  The application entry point.
   * @retval int
   */
-int main(void) {
+int main(void)
+{
 
   /* USER CODE BEGIN 1 */
 	// Place for any early variable init
@@ -1327,8 +1328,7 @@ int main(void) {
 			IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port,
 					IMD_FAULT_Pin);
 
-			if (BMSFaultState == GPIO_PIN_RESET
-					&& IMDFaultState == GPIO_PIN_RESET) {
+			if (BMSFaultState == GPIO_PIN_RESET && IMDFaultState == GPIO_PIN_RESET) {
 				break;
 			}
 			HAL_Delay(10);
