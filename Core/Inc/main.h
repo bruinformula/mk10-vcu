@@ -91,10 +91,10 @@ void Error_Handler(void);
 #define SWO_GPIO_Port GPIOB
 #define IMD_FAULT_Pin GPIO_PIN_4
 #define IMD_FAULT_GPIO_Port GPIOB
-#define BMS_FAULT_Pin GPIO_PIN_5
-#define BMS_FAULT_GPIO_Port GPIOB
-#define BSPD_FAULT_Pin GPIO_PIN_6
+#define BSPD_FAULT_Pin GPIO_PIN_5
 #define BSPD_FAULT_GPIO_Port GPIOB
+#define BMS_FAULT_Pin GPIO_PIN_6
+#define BMS_FAULT_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 #define DRIVE 0
