@@ -8,9 +8,9 @@
 #ifndef INC_CONSTANTS_H_
 #define INC_CONSTANTS_H_
 
-const uint16_t APPS1_RANK = 2;
-const uint16_t APPS2_RANK = 3;
-const uint16_t BSE_RANK = 1;
+const uint16_t APPS1_RANK = 1;
+const uint16_t APPS2_RANK = 2;
+const uint16_t BSE_RANK = 3;
 
 //const uint16_t APPS_1_ADC_MAX_VAL = 3116;
 //const uint16_t APPS_1_ADC_MIN_VAL = 312;
@@ -54,7 +54,7 @@ const uint16_t APPS_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
 const uint16_t BSE_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
 
-const uint16_t BRAKE_ACTIVATED_ADC_VAL = 580;
+const uint16_t BRAKE_ACTIVATED_ADC_VAL = 700;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_APPS_PERCENT = 25;
 const uint16_t CROSS_CHECK_RESTORATION_APPS_PERCENT = 5;
 const uint16_t CROSS_CHECK_IMPLAUSIBILITY_TIMEOUT_MILLIS = 100;
