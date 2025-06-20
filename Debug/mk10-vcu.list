@@ -39,9 +39,9 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  17 .debug_line   000149ba  00000000  00000000  000a7876  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0009ce5b  00000000  00000000  000bc230  2**0
+ 18 .debug_str    0009ce5c  00000000  00000000  000bc230  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  0015908b  2**0
+ 19 .comment      00000043  00000000  00000000  0015908c  2**0
                   CONTENTS, READONLY
  20 .debug_frame  0000487c  00000000  00000000  001590d0  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
@@ -2036,63 +2036,63 @@ void checkAPPSPlausibility(void) {
  800102c:	20000090 	.word	0x20000090
  8001030:	200000a0 	.word	0x200000a0
 
-08001034 <checkBSEPausibility>:
-void checkBSEPausibility(void) {
+08001034 <checkBSEPlausibility>:
+void checkBSEPlausibility(void) {
  8001034:	b508      	push	{r3, lr}
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
- 8001036:	4b1d      	ldr	r3, [pc, #116]	@ (80010ac <checkBSEPausibility+0x78>)
+ 8001036:	4b1d      	ldr	r3, [pc, #116]	@ (80010ac <checkBSEPlausibility+0x78>)
  8001038:	edd3 7a00 	vldr	s15, [r3]
  800103c:	eef8 7a67 	vcvt.f32.u32	s15, s15
- 8001040:	ed9f 7a1b 	vldr	s14, [pc, #108]	@ 80010b0 <checkBSEPausibility+0x7c>
+ 8001040:	ed9f 7a1b 	vldr	s14, [pc, #108]	@ 80010b0 <checkBSEPlausibility+0x7c>
  8001044:	ee77 7ac7 	vsub.f32	s15, s15, s14
 			/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
- 8001048:	eddf 6a1a 	vldr	s13, [pc, #104]	@ 80010b4 <checkBSEPausibility+0x80>
+ 8001048:	eddf 6a1a 	vldr	s13, [pc, #104]	@ 80010b4 <checkBSEPlausibility+0x80>
  800104c:	ee87 7aa6 	vdiv.f32	s14, s15, s13
- 8001050:	eddf 7a19 	vldr	s15, [pc, #100]	@ 80010b8 <checkBSEPausibility+0x84>
+ 8001050:	eddf 7a19 	vldr	s15, [pc, #100]	@ 80010b8 <checkBSEPlausibility+0x84>
  8001054:	ee67 7a27 	vmul.f32	s15, s14, s15
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
- 8001058:	4b18      	ldr	r3, [pc, #96]	@ (80010bc <checkBSEPausibility+0x88>)
+ 8001058:	4b18      	ldr	r3, [pc, #96]	@ (80010bc <checkBSEPlausibility+0x88>)
  800105a:	edc3 7a00 	vstr	s15, [r3]
 	if (bse_plausible && (bse_as_percent > 100.0f || bse_as_percent < 0.0f)) {
- 800105e:	4b18      	ldr	r3, [pc, #96]	@ (80010c0 <checkBSEPausibility+0x8c>)
+ 800105e:	4b18      	ldr	r3, [pc, #96]	@ (80010c0 <checkBSEPlausibility+0x8c>)
  8001060:	881b      	ldrh	r3, [r3, #0]
- 8001062:	b15b      	cbz	r3, 800107c <checkBSEPausibility+0x48>
- 8001064:	ed9f 7a14 	vldr	s14, [pc, #80]	@ 80010b8 <checkBSEPausibility+0x84>
+ 8001062:	b15b      	cbz	r3, 800107c <checkBSEPlausibility+0x48>
+ 8001064:	ed9f 7a14 	vldr	s14, [pc, #80]	@ 80010b8 <checkBSEPlausibility+0x84>
  8001068:	eef4 7ac7 	vcmpe.f32	s15, s14
  800106c:	eef1 fa10 	vmrs	APSR_nzcv, fpscr
- 8001070:	dc09      	bgt.n	8001086 <checkBSEPausibility+0x52>
+ 8001070:	dc09      	bgt.n	8001086 <checkBSEPlausibility+0x52>
  8001072:	eef5 7ac0 	vcmpe.f32	s15, #0.0
  8001076:	eef1 fa10 	vmrs	APSR_nzcv, fpscr
- 800107a:	d404      	bmi.n	8001086 <checkBSEPausibility+0x52>
+ 800107a:	d404      	bmi.n	8001086 <checkBSEPlausibility+0x52>
 	else if (!bse_plausible
- 800107c:	b15b      	cbz	r3, 8001096 <checkBSEPausibility+0x62>
+ 800107c:	b15b      	cbz	r3, 8001096 <checkBSEPlausibility+0x62>
 		bse_plausible = 1;
- 800107e:	4b10      	ldr	r3, [pc, #64]	@ (80010c0 <checkBSEPausibility+0x8c>)
+ 800107e:	4b10      	ldr	r3, [pc, #64]	@ (80010c0 <checkBSEPlausibility+0x8c>)
  8001080:	2201      	movs	r2, #1
  8001082:	801a      	strh	r2, [r3, #0]
 }
  8001084:	bd08      	pop	{r3, pc}
 		millis_since_bse_implausible = HAL_GetTick();
  8001086:	f001 fa19 	bl	80024bc <HAL_GetTick>
- 800108a:	4b0e      	ldr	r3, [pc, #56]	@ (80010c4 <checkBSEPausibility+0x90>)
+ 800108a:	4b0e      	ldr	r3, [pc, #56]	@ (80010c4 <checkBSEPlausibility+0x90>)
  800108c:	6018      	str	r0, [r3, #0]
 		bse_plausible = 0;
- 800108e:	4b0c      	ldr	r3, [pc, #48]	@ (80010c0 <checkBSEPausibility+0x8c>)
+ 800108e:	4b0c      	ldr	r3, [pc, #48]	@ (80010c0 <checkBSEPlausibility+0x8c>)
  8001090:	2200      	movs	r2, #0
  8001092:	801a      	strh	r2, [r3, #0]
- 8001094:	e7f6      	b.n	8001084 <checkBSEPausibility+0x50>
+ 8001094:	e7f6      	b.n	8001084 <checkBSEPlausibility+0x50>
 			&& (HAL_GetTick() - millis_since_bse_implausible
  8001096:	f001 fa11 	bl	80024bc <HAL_GetTick>
- 800109a:	4b0a      	ldr	r3, [pc, #40]	@ (80010c4 <checkBSEPausibility+0x90>)
+ 800109a:	4b0a      	ldr	r3, [pc, #40]	@ (80010c4 <checkBSEPlausibility+0x90>)
  800109c:	681b      	ldr	r3, [r3, #0]
  800109e:	1ac0      	subs	r0, r0, r3
  80010a0:	2863      	cmp	r0, #99	@ 0x63
- 80010a2:	d8ec      	bhi.n	800107e <checkBSEPausibility+0x4a>
+ 80010a2:	d8ec      	bhi.n	800107e <checkBSEPlausibility+0x4a>
 		requestedTorque = 0;
- 80010a4:	4b08      	ldr	r3, [pc, #32]	@ (80010c8 <checkBSEPausibility+0x94>)
+ 80010a4:	4b08      	ldr	r3, [pc, #32]	@ (80010c8 <checkBSEPlausibility+0x94>)
  80010a6:	2200      	movs	r2, #0
  80010a8:	601a      	str	r2, [r3, #0]
- 80010aa:	e7eb      	b.n	8001084 <checkBSEPausibility+0x50>
+ 80010aa:	e7eb      	b.n	8001084 <checkBSEPlausibility+0x50>
  80010ac:	20000100 	.word	0x20000100
  80010b0:	43b98000 	.word	0x43b98000
  80010b4:	45682000 	.word	0x45682000
@@ -2252,8 +2252,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
  800120e:	bd38      	pop	{r3, r4, r5, pc}
 		calculateTorqueRequest();
  8001210:	f7ff fe0e 	bl	8000e30 <calculateTorqueRequest>
-		checkBSEPausibility();
- 8001214:	f7ff ff0e 	bl	8001034 <checkBSEPausibility>
+		checkBSEPlausibility();
+ 8001214:	f7ff ff0e 	bl	8001034 <checkBSEPlausibility>
 		checkAPPSPlausibility();
  8001218:	f7ff fe72 	bl	8000f00 <checkAPPSPlausibility>
 		checkCrossCheck();

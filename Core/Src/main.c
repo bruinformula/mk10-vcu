@@ -241,7 +241,7 @@ void readFromCAN(void);
 void updateRpm(void);
 void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
-void checkBSEPausibility(void);
+void checkBSEPlausibility(void);
 void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
@@ -492,7 +492,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
 	if (prechargeFinished && readyToDrive) {
 		calculateTorqueRequest();
-		checkBSEPausibility();
+		checkBSEPlausibility();
 		checkAPPSPlausibility();
 		checkCrossCheck();
 
@@ -638,7 +638,7 @@ void checkAPPSPlausibility(void) {
 /**
  * @brief Check plausibility of APPS sensors.
  */
-void checkBSEPausibility(void) {
+void checkBSEPlausibility(void) {
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
 			/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
 
@@ -908,9 +908,13 @@ void sendPrechargeRequest(void) {
 			prechargeState = false;
 		} else if (HAL_GetTick() - millis_precharge
 				>= PRECHARGE_BUTTON_PRESS_MILLIS) {
-			__disable_irq();
+//			__disable_irq();
+//			prechargeFinished = prechargeSequence();
+//			__enable_irq();
+			// SLIME THIS OUT!!!!
+			HAL_ADC_Stop_DMA(&hadc1);
 			prechargeFinished = prechargeSequence();
-			__enable_irq();
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 		}
 #elif BMS_TYPE == CUSTOM_BMS
 		while (1) {}
@@ -1161,7 +1165,8 @@ void calibratePedalsMain(void) {
 	uint8_t lastdmaread = HAL_GetTick();
 	while (1) {
 		if(dma_read_complete){
-			__disable_irq();
+//			__disable_irq(); // SLIME THIS OUT!!!!!
+			HAL_ADC_Stop_DMA(&hadc1);
 			millis_since_dma_read = HAL_GetTick();
 			//
 			//			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
@@ -1187,8 +1192,10 @@ void calibratePedalsMain(void) {
 				lastCalcReadsPerSecTime = HAL_GetTick();
 			}
 			dma_read_complete = 0;
-			__enable_irq();
+//			__enable_irq();
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			//			sendDebugTorqueCommand();
+			// SLIME THIS OUT!!!
 		}
 
 
