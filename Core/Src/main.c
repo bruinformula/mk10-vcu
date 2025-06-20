@@ -988,8 +988,19 @@ uint8_t prechargeSequence(void) {
 		sendDiagMsg();
 	}
 
-	checkShutdown(); // In the case we broke out of the loop do to SDC Opening
+	// In the case we broke out of the loop do to SDC Opening
 	// Trigger the "system reset"
+	checkShutdown();
+	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
+	HAL_Delay(5);
+	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
+	HAL_Delay(5);
+	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET);
+	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b11000111;
+	sendDiagMsg();
+	prechargeState = false;
+	prechargeFinished = false;
+	HAL_Delay(10000);
 
 	return 0;
 }
