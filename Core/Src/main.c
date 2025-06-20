@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "CANSPI.h"
 #include "constants.h"
@@ -96,7 +97,6 @@ DMA_HandleTypeDef hdma_spi2_tx;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
 
@@ -232,7 +232,6 @@ static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_I2S2_Init(void);
-static void MX_TIM4_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -242,7 +241,7 @@ void readFromCAN(void);
 void updateRpm(void);
 void calculateTorqueRequest(void);
 void checkAPPSPlausibility(void);
-void checkBSEPausibility(void);
+void checkBSEPlausibility(void);
 void checkCrossCheck(void);
 void checkReadyToDrive(void);
 void sendTorqueCommand(void);
@@ -262,7 +261,7 @@ void calibratePedalsMain(void);
  */
 uint8_t pinState;
 //no fucking idea what this is for, probably some debug variable
-uint32_t penispenispenis;
+uint32_t bms_inverter_delta;
 
 /* USER CODE END PFP */
 
@@ -332,13 +331,16 @@ uint8_t checkShutdown() {
 
 	if (pinState == GPIO_PIN_RESET) {
 		//disable interrupts so there's no distractions
-		__disable_irq();
-		//i mean, torque isn't possible to be had, but still send 0 torque request
+		HAL_ADC_Stop_DMA(&hadc1);
+
+		// Assert that requested torque is 0 and that motor should not spin
 		requestedTorque = 0;
 		sendTorqueCommand();
 
 		//toggle airs off. first disconnect hot end for safety, then cascade with the rest
 		//5ms delays to avoid any weird timing things
+
+		// Can keep this in as toggling AIRs will not do anything w/ Accumulator disconnected!
 		HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //turn off air+
 		HAL_Delay(5);
 		HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET); //turn off air-
@@ -364,11 +366,12 @@ uint8_t checkShutdown() {
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
 		sendDiagMsg();
 
-		//reset all relevant variables for reenergization
+		//reset all relevant variables for re-energization
 		readyToDrive = false;
 		prechargeState = false;
 		rtdState = false;
 		prechargeFinished = false;
+
 		RTDButtonPressedDuration = 0;
 
 		diagMessage.frame.data7 = diagMessage.frame.data7 & 0b00000110;
@@ -376,7 +379,7 @@ uint8_t checkShutdown() {
 
 		HAL_Delay(5000);
 
-		__enable_irq();
+		HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 		return false;
 		//		lookForRTD();
 	}
@@ -455,7 +458,7 @@ void updateInverterVolts(void) {
  */
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
-	__disable_irq();
+
 #if VCUMODE == CALIBRATE_PEDALS
 	readsPer100msCounter++;
 #endif
@@ -489,7 +492,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
 	if (prechargeFinished && readyToDrive) {
 		calculateTorqueRequest();
-		checkBSEPausibility();
+		checkBSEPlausibility();
 		checkAPPSPlausibility();
 		checkCrossCheck();
 
@@ -500,9 +503,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	}
 
 	dma_read_complete = 1;
-	//			sendDebugTorqueCommand();
-	__enable_irq();
-
 }
 
 /**
@@ -603,15 +603,16 @@ void calculateTorqueRequest(void) {
  * from the expected 0 to like -70nm, even with the median filter, so instead of adding extra latency to every input
  * i just reject everythign that doesn't fit the bill and use last normal ass value
  */
-float paininmyass = 0.0;
+
+float pedalTravelDiffPercent = 0.0;
 void checkAPPSPlausibility(void) {
 	apps1_as_percent = ((float) apps1Value - APPS_1_ADC_MIN_VAL)
 			/ (APPS_1_ADC_MAX_VAL - APPS_1_ADC_MIN_VAL) * 100.0f;
 	apps2_as_percent = ((float) apps2Value - APPS_2_ADC_MIN_VAL)
 			/ (APPS_2_ADC_MAX_VAL - APPS_2_ADC_MIN_VAL) * 100.0f;
 
-	paininmyass = fabsf(fabsf(apps1_as_percent) - fabsf(apps2_as_percent));
-	if (paininmyass > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+	pedalTravelDiffPercent = fabsf(fabsf(apps1_as_percent) - fabsf(apps2_as_percent));
+	if (pedalTravelDiffPercent > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		if (apps_plausible)
 			millis_since_apps_implausible = HAL_GetTick(); //only grab the tick if it switched
 		apps_plausible = 0;
@@ -625,11 +626,11 @@ void checkAPPSPlausibility(void) {
 		apps_plausible = 0;
 		requestedTorque = 0;
 	}
-	if (paininmyass > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+	if (pedalTravelDiffPercent > APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		requestedTorque = 0;
 	}
 
-	else if (paininmyass < APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
+	else if (pedalTravelDiffPercent < APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		apps_plausible = 1;
 	}
 }
@@ -637,7 +638,7 @@ void checkAPPSPlausibility(void) {
 /**
  * @brief Check plausibility of APPS sensors.
  */
-void checkBSEPausibility(void) {
+void checkBSEPlausibility(void) {
 	bse_as_percent = ((float) bseValue - BSE_ADC_MIN_VAL)
 			/ (BSE_ADC_MAX_VAL - BSE_ADC_MIN_VAL) * 100.0f;
 
@@ -692,6 +693,7 @@ void checkCrossCheck(void) {
  * @brief Send the torque command message over CAN. also provide final checks to ensure no stupid torque requests
  */
 void sendTorqueCommand(void) {
+	// Test later for plausibility & crosscheck
 
 	if (finalTorqueRequest >= MAX_TORQUE) {
 		finalTorqueRequest = MAX_TORQUE;
@@ -795,8 +797,8 @@ void sendFanCommand(void) {
 void checkReadyToDrive(void) {
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 	RTDButtonState = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
-	penispenispenis = HAL_GPIO_ReadPin(RTD_BTN_GPIO_Port, RTD_BTN_Pin);
-	RTDButtonPressedDuration = HAL_GetTick() -millis_RTD;
+	RTDButtonPressedDuration = HAL_GetTick() - millis_RTD;
+
 	if (RTDButtonState == GPIO_PIN_SET && bseValue > BRAKE_ACTIVATED_ADC_VAL && bms_diagnostics.inverterActive &&!rtdState) {
 		rtdState = true;
 		millis_RTD = HAL_GetTick();
@@ -807,6 +809,8 @@ void checkReadyToDrive(void) {
 	else if(RTDButtonPressedDuration >= RTD_BUTTON_PRESS_MILLIS){
 		readyToDrive = true;
 	}
+
+// DOES NOT GO HERE FOR OUR MODE!!!! Since ONE_BUTTON_RTD_MODE_ENABLE is 0)
 #else
 
 	if (!prechargeFinished
@@ -844,8 +848,6 @@ void checkReadyToDrive(void) {
 
 void sendPrechargeRequest(void) {
 
-	__enable_irq(); //make sure interrupts are enabled so i can dma read if i want
-
 	while (!prechargeFinished) {
 		//			checkAPPSPlausibility();
 		//			checkCrossCheck();
@@ -853,6 +855,8 @@ void sendPrechargeRequest(void) {
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
+
+
 #if ONE_BUTTON_RTD_MODE_ENABLE == 0
 		prechargeButtonState = HAL_GPIO_ReadPin(PRECHARGE_BTN_GPIO_Port, PRECHARGE_BTN_Pin);
 
@@ -861,14 +865,15 @@ void sendPrechargeRequest(void) {
 			prechargeState = true;
 			millis_precharge = HAL_GetTick();
 		}
-		else if (prechargeButtonState == GPIO_PIN_RESET){
+		else if (prechargeButtonState == GPIO_PIN_RESET) {
 			prechargeState = false;
 		}
-		else if(HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS){
-			__disable_irq();
+		else if (HAL_GetTick()-millis_precharge >= PRECHARGE_BUTTON_PRESS_MILLIS) {
+			HAL_ADC_Stop_DMA(&hadc1);
 			prechargeFinished = prechargeSequence();
-			__enable_irq();
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 		}
+
 #elif BMS_TYPE == CUSTOM_BMS
 		while (1) {}
 #endif
@@ -895,15 +900,19 @@ void sendPrechargeRequest(void) {
 			prechargeState = false;
 		} else if (HAL_GetTick() - millis_precharge
 				>= PRECHARGE_BUTTON_PRESS_MILLIS) {
-			__disable_irq();
+//			__disable_irq();
+//			prechargeFinished = prechargeSequence();
+//			__enable_irq();
+			// SLIME THIS OUT!!!!
+			HAL_ADC_Stop_DMA(&hadc1);
 			prechargeFinished = prechargeSequence();
-			__enable_irq();
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 		}
 #elif BMS_TYPE == CUSTOM_BMS
 		while (1) {}
 #endif
 #endif
-	}
+	} // While Loop end brace
 }
 
 /**
@@ -922,7 +931,7 @@ void sendPrechargeRequest(void) {
  */
 
 uint32_t startPrechargeTime = 0;
-uint32_t penis = 0;
+uint32_t elapsedPrechargeTime = 0;
 uint8_t prechargeSequence(void) {
 	startPrechargeTime = HAL_GetTick();
 
@@ -933,18 +942,17 @@ uint8_t prechargeSequence(void) {
 	diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00110000;
 	sendDiagMsg();
 
-	//close negative AIR and precharge relay
+	// Close negative AIR and precharge relay: STARTS PRECHARGING
 	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 	HAL_Delay(3);
 	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_SET); //steps 1 and 2
 	HAL_Delay(3);
 	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET); //steps 1 and 2
 
-	// penis is just the time since precharge was started
-	penis = HAL_GetTick() - startPrechargeTime;
+	elapsedPrechargeTime = HAL_GetTick() - startPrechargeTime;
 
-	//timeout if precharge has taken longer than PRECHARGE_TIMEOUT_MS or if the SDC opens in between
-	while (penis < PRECHARGE_TIMEOUT_MS
+	//timeout if precharge has taken longer than PRECHARGE_TIMEOUT_MS or if the SDC opens in between (pulling SHUTDOWN Gpio low)
+	while (elapsedPrechargeTime < PRECHARGE_TIMEOUT_MS
 			&& HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin)
 					== GPIO_PIN_SET) { //loop for 4
 
@@ -952,6 +960,10 @@ uint8_t prechargeSequence(void) {
 		if (CANSPI_Receive(&rxMessage)) {
 			readFromCAN();
 		}
+
+		// Monitor voltages within the if statement
+		// Once sufficiently precharged we enter the if statement & stop precharging
+		// Return 1; note that prechargedFinished = true
 
 		if (bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts
 				< PRECHARGE_VOLTAGE_DIFF && bms_diagnostics.packVoltage > 10) {
@@ -962,29 +974,22 @@ uint8_t prechargeSequence(void) {
 			HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin,
 					GPIO_PIN_RESET);
 			prechargeFinished = true;
-			penispenispenis = bms_diagnostics.packVoltage
-					- inverter_diagnostics.inverterDCVolts;
+
+			bms_inverter_delta = bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts;
+			// NOTE: bms_diagnostics.packVoltage - inverter_diagnostics.inverterDCVolts is the "DELTA"
+
 			diagMessage.frame.data7 = diagMessage.frame.data7 | 0b00011000;
 			sendDiagMsg();
 			return 1;
 		}
 
-		penis = HAL_GetTick() - startPrechargeTime;
+		elapsedPrechargeTime = HAL_GetTick() - startPrechargeTime;
 		sendDiagMsg();
 	}
 
-	/** UNTESTED WEIRD CHANGE: just checkShutdown (should trigger the system reset) isntead of doing it again **/
-	checkShutdown();
-	//	HAL_GPIO_WritePin(PCHG_RLY_CTRL_GPIO_Port, PCHG_RLY_CTRL_Pin, GPIO_PIN_RESET);
-	//	HAL_Delay(5);
-	//	HAL_GPIO_WritePin(AIR_N_CTRL_GPIO_Port, AIR_N_CTRL_Pin, GPIO_PIN_RESET);
-	//	HAL_Delay(5);
-	//	HAL_GPIO_WritePin(AIR_P_CTRL_GPIO_Port, AIR_P_CTRL_Pin, GPIO_PIN_RESET);
-	//	diagMessage.frame.data7 = diagMessage.frame.data7 & 0b11000111;
-	//	sendDiagMsg();
-	//	HAL_Delay(5000);
-	//	prechargeState = false;
-	//	prechargeFinished = false;
+	checkShutdown(); // In the case we broke out of the loop do to SDC Opening
+	// Trigger the "system reset"
+
 	return 0;
 }
 
@@ -1039,14 +1044,16 @@ void PlayStartupSoundOnce(void) {
 	HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*) chunkPtr, thisChunk);
 }
 
-GPIO_PinState ballsandcock;
+GPIO_PinState shutdownState;
 void lookForRTD(void) {
 	if (rtdoverride == 1) {
 		beginTorqueRequests = true;
 		PlayStartupSoundOnce();
 		return;
 	}
+
 	diagMessage.frame.data7 = diagMessage.frame.data7 | 1;
+
 	while (!readyToDrive) {
 
 		if (CANSPI_Receive(&rxMessage)) {
@@ -1058,11 +1065,11 @@ void lookForRTD(void) {
 			millis_since_dma_read = HAL_GetTick();
 		}
 
-		//add check for make sure apps are 0 travel
+		// TODO: Add check for make sure APPS are 0 travel
 
-		ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
-		while (ballsandcock == GPIO_PIN_RESET) {
-			ballsandcock = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+		shutdownState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
+		while (shutdownState == GPIO_PIN_RESET) {
+			shutdownState = HAL_GPIO_ReadPin(SHUTDOWN_GPIO_Port, SHUTDOWN_Pin);
 			HAL_Delay(5);
 		}
 
@@ -1070,7 +1077,7 @@ void lookForRTD(void) {
 
 		// If the driver is ready to drive, send torque over CAN
 		uint8_t prevReadyToDrive = readyToDrive;
-		checkReadyToDrive();
+		checkReadyToDrive(); // Simple button press check, NON blocking
 
 		if (readyToDrive) {
 			// If we just transitioned from not-ready to ready, play sound
@@ -1081,8 +1088,8 @@ void lookForRTD(void) {
 				diagMessage.frame.data7 = diagMessage.frame.data7 & 0x11111110;
 
 				//send disable message, maybe this'll let lockout go away
-				for (int erectiledysfunction = 0; erectiledysfunction < 3;
-						erectiledysfunction++) {
+				for (int i = 0; i < 3;
+						i++) {
 					torqueRequestMessage.frame.data0 = 0;
 					torqueRequestMessage.frame.data1 = 0;
 					torqueRequestMessage.frame.data2 = 0;
@@ -1150,7 +1157,8 @@ void calibratePedalsMain(void) {
 	uint8_t lastdmaread = HAL_GetTick();
 	while (1) {
 		if(dma_read_complete){
-			__disable_irq();
+//			__disable_irq(); // SLIME THIS OUT!!!!!
+			HAL_ADC_Stop_DMA(&hadc1);
 			millis_since_dma_read = HAL_GetTick();
 			//
 			//			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
@@ -1176,8 +1184,10 @@ void calibratePedalsMain(void) {
 				lastCalcReadsPerSecTime = HAL_GetTick();
 			}
 			dma_read_complete = 0;
-			__enable_irq();
+//			__enable_irq();
+			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			//			sendDebugTorqueCommand();
+			// SLIME THIS OUT!!!
 		}
 
 
@@ -1245,41 +1255,41 @@ void DebugMain(void) {
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
-int main(void) {
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
 
-	/* USER CODE BEGIN 1 */
+  /* USER CODE BEGIN 1 */
 	// Place for any early variable init
 
-	/* USER CODE END 1 */
+  /* USER CODE END 1 */
 
-	/* MCU Configuration--------------------------------------------------------*/
+  /* MCU Configuration--------------------------------------------------------*/
 
-	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-	HAL_Init();
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
 
-	/* USER CODE BEGIN Init */
+  /* USER CODE BEGIN Init */
 
-	/* USER CODE END Init */
+  /* USER CODE END Init */
 
-	/* Configure the system clock */
-	SystemClock_Config();
+  /* Configure the system clock */
+  SystemClock_Config();
 
-	/* USER CODE BEGIN SysInit */
+  /* USER CODE BEGIN SysInit */
 
-	/* USER CODE END SysInit */
+  /* USER CODE END SysInit */
 
-	/* Initialize all configured peripherals */
-	MX_GPIO_Init();
-	MX_DMA_Init();
-	MX_ADC1_Init();
-	MX_SPI3_Init();
-	MX_I2S2_Init();
-	MX_TIM4_Init();
-	MX_TIM3_Init();
-	/* USER CODE BEGIN 2 */
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_DMA_Init();
+  MX_ADC1_Init();
+  MX_SPI3_Init();
+  MX_I2S2_Init();
+  MX_TIM3_Init();
+  /* USER CODE BEGIN 2 */
 
 	/** TSSI GPIO handling. do this before everything else, moderately timing critical to prevent light from turning on
 	 *
@@ -1304,6 +1314,7 @@ int main(void) {
 		HAL_Delay(10);
 		uint32_t start = HAL_GetTick();
 		while ((HAL_GetTick() - start) < 30000) {
+			// Need to spoof BMS & IMD Fault State on Shutdown, leave these GPIO Checks in code
 			BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port,
 					BMS_FAULT_Pin);
 			IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port,
@@ -1319,22 +1330,8 @@ int main(void) {
 		HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);
 	}
 
-	/*
 
-	 while(BMSFaultState == GPIO_PIN_SET || IMDFaultState == GPIO_PIN_SET) {
-	 BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port, BMS_FAULT_Pin);
-	 IMDFaultState = HAL_GPIO_ReadPin(IMD_FAULT_GPIO_Port, IMD_FAULT_Pin);
-	 HAL_Delay(10);
-	 }
-
-	 HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_RESET);*/
-	// Start TIM4
-	//	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-	//start tim3; generates interrupts for DMA reads. configure ONLY in IOC file
 	HAL_TIM_Base_Start(&htim3);
-
-	//start DMA
-	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
 #if VCUMODE == CALIBRATE_PEDALS
 	APPS1Bounds.min = 4096;
@@ -1345,6 +1342,7 @@ int main(void) {
 	BSEBounds.max = 0;
 #endif
 	// Initialize the CAN at 500kbps (CANSPI_Initialize sets the MCP2515)
+
 	if (CANSPI_Initialize() != true) {
 		Error_Handler();
 	}
@@ -1369,10 +1367,13 @@ int main(void) {
 	torqueRequestMessage.frame.id = 0x0C0;
 	torqueRequestMessage.frame.dlc = 8;
 
-	/* USER CODE END 2 */
+	//start DMA
+	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 
-	/* Infinite loop */
-	/* USER CODE BEGIN WHILE */
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
 
 	if (VCUMODE == CALIBRATE_PEDALS) {
 		calibratePedalsMain();
@@ -1402,7 +1403,8 @@ int main(void) {
 			if (CANSPI_Receive(&rxMessage)) {
 				readFromCAN();
 			}
-			checkShutdown();  // If pin is low, torque->0, block
+
+			checkShutdown();  // If pin is low, torque->0, block and trigger system reset...
 
 			if (dma_read_complete) {
 				if (readyToDrive || rtdoverride == 1) {
@@ -1413,455 +1415,422 @@ int main(void) {
 			}
 
 			updateBMSDiagnostics();
-
 			sendDiagMsg();
 			// ... do other tasks as needed ...
 		}
 	}
-	/* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-	/* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
 	// Should never get here
 	/* USER CODE BEGIN 3 */
 	// should never reach here
-	/* USER CODE END 3 */
+  /* USER CODE END 3 */
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
-void SystemClock_Config(void) {
-	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
-	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-	/** Configure the main internal regulator output voltage
-	 */
-	__HAL_RCC_PWR_CLK_ENABLE();
-	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+  /** Configure the main internal regulator output voltage
+  */
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
 
-	/** Initializes the RCC Oscillators according to the specified parameters
-	 * in the RCC_OscInitTypeDef structure.
-	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-	RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-	RCC_OscInitStruct.PLL.PLLM = 8;
-	RCC_OscInitStruct.PLL.PLLN = 84;
-	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-	RCC_OscInitStruct.PLL.PLLQ = 7;
-	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-		Error_Handler();
-	}
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 84;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-	/** Initializes the CPU, AHB and APB buses clocks
-	 */
-	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-			| RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
-		Error_Handler();
-	}
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /**
- * @brief ADC1 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_ADC1_Init(void) {
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
 
-	/* USER CODE BEGIN ADC1_Init 0 */
+  /* USER CODE BEGIN ADC1_Init 0 */
 
-	/* USER CODE END ADC1_Init 0 */
+  /* USER CODE END ADC1_Init 0 */
 
-	ADC_ChannelConfTypeDef sConfig = { 0 };
+  ADC_ChannelConfTypeDef sConfig = {0};
 
-	/* USER CODE BEGIN ADC1_Init 1 */
+  /* USER CODE BEGIN ADC1_Init 1 */
 
-	/* USER CODE END ADC1_Init 1 */
+  /* USER CODE END ADC1_Init 1 */
 
-	/** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-	 */
-	hadc1.Instance = ADC1;
-	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
-	hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-	hadc1.Init.ScanConvMode = ENABLE;
-	hadc1.Init.ContinuousConvMode = DISABLE;
-	hadc1.Init.DiscontinuousConvMode = DISABLE;
-	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-	hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_TRGO;
-	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc1.Init.NbrOfConversion = 3;
-	hadc1.Init.DMAContinuousRequests = ENABLE;
-	hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
-	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
-		Error_Handler();
-	}
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.ScanConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T3_TRGO;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.NbrOfConversion = 3;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_14;
-	sConfig.Rank = 2;
-	sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
-		Error_Handler();
-	}
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_14;
+  sConfig.Rank = 2;
+  sConfig.SamplingTime = ADC_SAMPLETIME_56CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_15;
-	sConfig.Rank = 3;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
-		Error_Handler();
-	}
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_15;
+  sConfig.Rank = 3;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_1;
-	sConfig.Rank = 1;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
-		Error_Handler();
-	}
-	/* USER CODE BEGIN ADC1_Init 2 */
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = 1;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
 
-	/* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
- * @brief I2S2 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_I2S2_Init(void) {
-
-	/* USER CODE BEGIN I2S2_Init 0 */
-
-	/* USER CODE END I2S2_Init 0 */
-
-	/* USER CODE BEGIN I2S2_Init 1 */
-
-	/* USER CODE END I2S2_Init 1 */
-	hi2s2.Instance = SPI2;
-	hi2s2.Init.Mode = I2S_MODE_MASTER_TX;
-	hi2s2.Init.Standard = I2S_STANDARD_PHILIPS;
-	hi2s2.Init.DataFormat = I2S_DATAFORMAT_16B;
-	hi2s2.Init.MCLKOutput = I2S_MCLKOUTPUT_DISABLE;
-	hi2s2.Init.AudioFreq = I2S_AUDIOFREQ_44K;
-	hi2s2.Init.CPOL = I2S_CPOL_LOW;
-	hi2s2.Init.ClockSource = I2S_CLOCK_PLL;
-	hi2s2.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
-	if (HAL_I2S_Init(&hi2s2) != HAL_OK) {
-		Error_Handler();
-	}
-	/* USER CODE BEGIN I2S2_Init 2 */
-
-	/* USER CODE END I2S2_Init 2 */
+  /* USER CODE END ADC1_Init 2 */
 
 }
 
 /**
- * @brief SPI3 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_SPI3_Init(void) {
+  * @brief I2S2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2S2_Init(void)
+{
 
-	/* USER CODE BEGIN SPI3_Init 0 */
+  /* USER CODE BEGIN I2S2_Init 0 */
 
-	/* USER CODE END SPI3_Init 0 */
+  /* USER CODE END I2S2_Init 0 */
 
-	/* USER CODE BEGIN SPI3_Init 1 */
+  /* USER CODE BEGIN I2S2_Init 1 */
 
-	/* USER CODE END SPI3_Init 1 */
-	/* SPI3 parameter configuration*/
-	hspi3.Instance = SPI3;
-	hspi3.Init.Mode = SPI_MODE_MASTER;
-	hspi3.Init.Direction = SPI_DIRECTION_2LINES;
-	hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
-	hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
-	hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
-	hspi3.Init.NSS = SPI_NSS_SOFT;
-	hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
-	hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
-	hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
-	hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-	hspi3.Init.CRCPolynomial = 10;
-	if (HAL_SPI_Init(&hspi3) != HAL_OK) {
-		Error_Handler();
-	}
-	/* USER CODE BEGIN SPI3_Init 2 */
+  /* USER CODE END I2S2_Init 1 */
+  hi2s2.Instance = SPI2;
+  hi2s2.Init.Mode = I2S_MODE_MASTER_TX;
+  hi2s2.Init.Standard = I2S_STANDARD_PHILIPS;
+  hi2s2.Init.DataFormat = I2S_DATAFORMAT_16B;
+  hi2s2.Init.MCLKOutput = I2S_MCLKOUTPUT_DISABLE;
+  hi2s2.Init.AudioFreq = I2S_AUDIOFREQ_44K;
+  hi2s2.Init.CPOL = I2S_CPOL_LOW;
+  hi2s2.Init.ClockSource = I2S_CLOCK_PLL;
+  hi2s2.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
+  if (HAL_I2S_Init(&hi2s2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2S2_Init 2 */
 
-	/* USER CODE END SPI3_Init 2 */
+  /* USER CODE END I2S2_Init 2 */
 
 }
 
 /**
- * @brief TIM3 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_TIM3_Init(void) {
+  * @brief SPI3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
 
-	/* USER CODE BEGIN TIM3_Init 0 */
+  /* USER CODE BEGIN SPI3_Init 0 */
 
-	/* USER CODE END TIM3_Init 0 */
+  /* USER CODE END SPI3_Init 0 */
 
-	TIM_ClockConfigTypeDef sClockSourceConfig = { 0 };
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+  /* USER CODE BEGIN SPI3_Init 1 */
 
-	/* USER CODE BEGIN TIM3_Init 1 */
+  /* USER CODE END SPI3_Init 1 */
+  /* SPI3 parameter configuration*/
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI3_Init 2 */
 
-	/* USER CODE END TIM3_Init 1 */
-	htim3.Instance = TIM3;
-	htim3.Init.Prescaler = 1;
-	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim3.Init.Period = 1000;
-	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-	if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
-		Error_Handler();
-	}
-	sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-	if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
-		Error_Handler();
-	}
-	sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
-	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig)
-			!= HAL_OK) {
-		Error_Handler();
-	}
-	/* USER CODE BEGIN TIM3_Init 2 */
-
-	/* USER CODE END TIM3_Init 2 */
+  /* USER CODE END SPI3_Init 2 */
 
 }
 
 /**
- * @brief TIM4 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_TIM4_Init(void) {
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
 
-	/* USER CODE BEGIN TIM4_Init 0 */
+  /* USER CODE BEGIN TIM3_Init 0 */
 
-	/* USER CODE END TIM4_Init 0 */
+  /* USER CODE END TIM3_Init 0 */
 
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
-	TIM_OC_InitTypeDef sConfigOC = { 0 };
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-	/* USER CODE BEGIN TIM4_Init 1 */
+  /* USER CODE BEGIN TIM3_Init 1 */
 
-	/* USER CODE END TIM4_Init 1 */
-	htim4.Instance = TIM4;
-	htim4.Init.Prescaler = 3360;
-	htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim4.Init.Period = 255;
-	htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-	htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-	if (HAL_TIM_PWM_Init(&htim4) != HAL_OK) {
-		Error_Handler();
-	}
-	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-	if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig)
-			!= HAL_OK) {
-		Error_Handler();
-	}
-	sConfigOC.OCMode = TIM_OCMODE_PWM1;
-	sConfigOC.Pulse = 127;
-	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-	if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4)
-			!= HAL_OK) {
-		Error_Handler();
-	}
-	/* USER CODE BEGIN TIM4_Init 2 */
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 42;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
 
-	/* USER CODE END TIM4_Init 2 */
-	HAL_TIM_MspPostInit(&htim4);
+  /* USER CODE END TIM3_Init 2 */
 
 }
 
 /**
- * Enable DMA controller clock
- */
-static void MX_DMA_Init(void) {
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
 
-	/* DMA controller clock enable */
-	__HAL_RCC_DMA2_CLK_ENABLE();
-	__HAL_RCC_DMA1_CLK_ENABLE();
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
-	/* DMA interrupt init */
-	/* DMA1_Stream4_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
-	HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
-	/* DMA2_Stream0_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA interrupt init */
+  /* DMA1_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 
 }
 
 /**
- * @brief GPIO Initialization Function
- * @param None
- * @retval None
- */
-static void MX_GPIO_Init(void) {
-	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
-	/* USER CODE BEGIN MX_GPIO_Init_1 */
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
 
-	/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
-	/* GPIO Ports Clock Enable */
-	__HAL_RCC_GPIOC_CLK_ENABLE();
-	__HAL_RCC_GPIOH_CLK_ENABLE();
-	__HAL_RCC_GPIOA_CLK_ENABLE();
-	__HAL_RCC_GPIOB_CLK_ENABLE();
-	__HAL_RCC_GPIOD_CLK_ENABLE();
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(GPIOC,
-			LED1_Pin | PCHG_RLY_CTRL_Pin | AIR_P_CTRL_Pin | AIR_N_CTRL_Pin,
-			GPIO_PIN_RESET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, LED1_Pin|PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin, GPIO_PIN_RESET);
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(GPIOC, CAN_CS_Pin | CAN1_RESET_Pin | CAN2_RESET_Pin,
-			GPIO_PIN_SET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, CAN_CS_Pin|CAN1_RESET_Pin|CAN2_RESET_Pin, GPIO_PIN_SET);
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(GPIOB, TSSI_LATCH_Pin | GPIO_PIN_1, GPIO_PIN_SET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, TSSI_LATCH_Pin|GPIO_PIN_1, GPIO_PIN_SET);
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CAN2_CS_GPIO_Port, CAN2_CS_Pin, GPIO_PIN_SET);
 
-	/*Configure GPIO pin : LED1_Pin */
-	GPIO_InitStruct.Pin = LED1_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : LED1_Pin */
+  GPIO_InitStruct.Pin = LED1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : CAN_CS_Pin */
-	GPIO_InitStruct.Pin = CAN_CS_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	HAL_GPIO_Init(CAN_CS_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : CAN_CS_Pin */
+  GPIO_InitStruct.Pin = CAN_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(CAN_CS_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : CAN1_RESET_Pin CAN2_RESET_Pin */
-	GPIO_InitStruct.Pin = CAN1_RESET_Pin | CAN2_RESET_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  /*Configure GPIO pins : CAN1_RESET_Pin CAN2_RESET_Pin */
+  GPIO_InitStruct.Pin = CAN1_RESET_Pin|CAN2_RESET_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : PA2 PA3 */
-	GPIO_InitStruct.Pin = GPIO_PIN_2 | GPIO_PIN_3;
-	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /*Configure GPIO pins : PA2 PA3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : LED2_Pin */
-	GPIO_InitStruct.Pin = LED2_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : LED2_Pin */
+  GPIO_InitStruct.Pin = LED2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LED2_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : TSSI_LATCH_Pin PB1 */
-	GPIO_InitStruct.Pin = TSSI_LATCH_Pin | GPIO_PIN_1;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  /*Configure GPIO pins : TSSI_LATCH_Pin PB1 */
+  GPIO_InitStruct.Pin = TSSI_LATCH_Pin|GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : RTD_BTN_Pin IMD_FAULT_Pin BMS_FAULT_Pin */
-	GPIO_InitStruct.Pin = RTD_BTN_Pin | IMD_FAULT_Pin | BMS_FAULT_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  /*Configure GPIO pins : RTD_BTN_Pin IMD_FAULT_Pin BMS_FAULT_Pin */
+  GPIO_InitStruct.Pin = RTD_BTN_Pin|IMD_FAULT_Pin|BMS_FAULT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
-	GPIO_InitStruct.Pin = PCHG_RLY_CTRL_Pin | AIR_P_CTRL_Pin | AIR_N_CTRL_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  /*Configure GPIO pins : PCHG_RLY_CTRL_Pin AIR_P_CTRL_Pin AIR_N_CTRL_Pin */
+  GPIO_InitStruct.Pin = PCHG_RLY_CTRL_Pin|AIR_P_CTRL_Pin|AIR_N_CTRL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : PRECHARGE_BTN_Pin */
-	GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	HAL_GPIO_Init(PRECHARGE_BTN_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : PRECHARGE_BTN_Pin */
+  GPIO_InitStruct.Pin = PRECHARGE_BTN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(PRECHARGE_BTN_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : CAN2_CS_Pin */
-	GPIO_InitStruct.Pin = CAN2_CS_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : CAN2_CS_Pin */
+  GPIO_InitStruct.Pin = CAN2_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(CAN2_CS_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : SHUTDOWN_Pin */
-	GPIO_InitStruct.Pin = SHUTDOWN_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : SHUTDOWN_Pin */
+  GPIO_InitStruct.Pin = SHUTDOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(SHUTDOWN_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : BSPD_FAULT_Pin */
-	GPIO_InitStruct.Pin = BSPD_FAULT_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(BSPD_FAULT_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin : BSPD_FAULT_Pin */
+  GPIO_InitStruct.Pin = BSPD_FAULT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BSPD_FAULT_GPIO_Port, &GPIO_InitStruct);
 
-	/* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
 
-	/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
-void Error_Handler(void) {
-	/* USER CODE BEGIN Error_Handler_Debug */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1) {
 	}
-	/* USER CODE END Error_Handler_Debug */
+  /* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-	/* USER CODE BEGIN 6 */
+  /* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-	/* USER CODE END 6 */
+  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
