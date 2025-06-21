@@ -1324,7 +1324,7 @@ int main(void)
 		HAL_GPIO_WritePin(TSSI_LATCH_GPIO_Port, TSSI_LATCH_Pin, GPIO_PIN_SET);
 		HAL_Delay(10);
 		uint32_t start = HAL_GetTick();
-		while ((HAL_GetTick() - start) < 30000) {
+		while ((HAL_GetTick() - start) < 5000) {
 			// Need to spoof BMS & IMD Fault State on Shutdown, leave these GPIO Checks in code
 			BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port,
 			BMS_FAULT_Pin);

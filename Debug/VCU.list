@@ -3469,15 +3469,15 @@ void Error_Handler(void)
 		uint32_t start = HAL_GetTick();
  8001ad0:	f000 fd3e 	bl	8002550 <HAL_GetTick>
  8001ad4:	4606      	mov	r6, r0
-		while ((HAL_GetTick() - start) < 30000) {
+		while ((HAL_GetTick() - start) < 20000) {
  8001ad6:	e002      	b.n	8001ade <main+0x52>
 			HAL_Delay(10);
  8001ad8:	200a      	movs	r0, #10
  8001ada:	f000 fd45 	bl	8002568 <HAL_Delay>
-		while ((HAL_GetTick() - start) < 30000) {
+		while ((HAL_GetTick() - start) < 20000) {
  8001ade:	f000 fd37 	bl	8002550 <HAL_GetTick>
  8001ae2:	1b80      	subs	r0, r0, r6
- 8001ae4:	f247 532f 	movw	r3, #29999	@ 0x752f
+ 8001ae4:	f644 631f 	movw	r3, #19999	@ 0x4e1f
  8001ae8:	4298      	cmp	r0, r3
  8001aea:	d80d      	bhi.n	8001b08 <main+0x7c>
 			BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port,
