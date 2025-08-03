@@ -43,6 +43,8 @@ const float REGEN_MAX_TORQUE = -30;
 //const float REGEN_BASELINE_TORQUE = 0;
 //const float REGEN_MAX_TORQUE = 0;
 
+const float REGEN_BRK_DELAY_TIME = 50; //50ms of above 5kpmh speed before regen torque can be requested
+
 const float MAX_RPM = 5500;
 
 const uint16_t BSE_ADC_MIN_VAL = 371;
@@ -95,6 +97,6 @@ const uint16_t PRECHARGE_BUTTON_PRESS_MILLIS = 1000;
 
 #define ADC_READ_BUFFER 7
 
-#define RPM_TO_CARSPEED_CONVFACTOR (59.0f * 32.0f * 3.14159f * 60.0f) / (12.0f * 39370.1f)
+#define RPM_TO_CARSPEED_CONVFACTOR (12.0f * 2.0f * 16.0f * 3.14159f * 60.0f) / (59.0f * 12.0f * 3280.0f)
 
 #endif /* INC_CONSTANTS_H_ */

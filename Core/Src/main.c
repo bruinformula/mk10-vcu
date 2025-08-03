@@ -40,6 +40,12 @@
  */
 #define VCUMODE DRIVE
 
+// allow debugging of SPECIFICALLY regen delay. set this to true while in vcumode == calibratepedals
+#define ALLOW_REGEN_DELAY_DEBUG 1
+
+//allow debugging of SPECIFICALLY pedal read frequency/pedal latency. set this to true and read out
+#define ALLOW_PEDAL_READ_FREQ_DEBUG 1
+
 /**
  * one button RTD mode; press just the RTD button to both precharge and RTD when ready
  */
@@ -110,11 +116,11 @@ uCAN_MSG diagMessage;
 //message to orion bms to turn on fans. NOT EVER USED
 uCAN_MSG fanMessage;
 
-#if VCUMODE == CALIBRATE_PEDALS
+#if VCUMODE == CALIBRATE_PEDALS || ALLOW_PEDAL_READ_FREQ_DEBUG == 1
 /* **** APPS READS PER SECOND COUNTERS, FOR DIAGNOSTIC PURPOSES **** */
 //counter for APPS reads per 100ms. gets reset every 100ms
 uint16_t readsPer100msCounter = 0;
-//actual APPS reads per 100ms. not really sure why this also exists in addition to above variable
+//actual APPS reads per 100ms. read this out to live expressions
 uint16_t readsPer100ms = 0;
 //current tick, update whenever u want a value. only used in calculating APPS reads every 100ms. for debug purposes
 uint32_t currtick = 0;
@@ -209,6 +215,11 @@ uint32_t millis_precharge;
 volatile GPIO_PinState prechargeButtonState;
 //current state of the RTD button
 volatile GPIO_PinState RTDButtonState;
+//time since carspeed dipped below 5kmph
+volatile uint32_t regenBrakingDelaySince = 0;
+//waiting for regen braking delay
+volatile uint8_t waitingRegenDelay = false;
+
 
 /* **** DIAGNOSTIC STRUCTURES **** */
 //diagnostics coming from BMS
@@ -459,7 +470,7 @@ void updateInverterVolts(void) {
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
-#if VCUMODE == CALIBRATE_PEDALS
+#if VCUMODE == CALIBRATE_PEDALS || ALLOW_PEDAL_READ_FREQ_DEBUG == 1
 	readsPer100msCounter++;
 #endif
 	// Store latest samples into buffers
@@ -577,6 +588,7 @@ void calculateTorqueRequest(void) {
 	//		requestedTorque = 0;
 	//	}
 	if (appsValue >= APPS_INFLECTION_PERCENT) { //apps travel is in range for forward torque
+		waitingRegenDelay = false; //restart delay counter thingy
 		requestedTorque = ((float) (MAX_TORQUE - MIN_TORQUE))
 				* (appsValue - APPS_INFLECTION_PERCENT);
 
@@ -584,14 +596,26 @@ void calculateTorqueRequest(void) {
 			requestedTorque = MAX_TORQUE;
 		}
 	} else { //apps travel is in range for reverse torque
-		if (inverter_diagnostics.carSpeed < 5.0f && VCUMODE != CALIBRATE_PEDALS) {
+#if VCUMODE != CALIBRATE_PEDALS || ALLOW_REGEN_DELAY_DEBUG == 1//if its in calibrate_pedals you wanna see regenerative torque request so show that
+		//should start waiting to allow torque requests
+		if (inverter_diagnostics.carSpeed > 5.0f && VCUMODE != CALIBRATE_PEDALS && waitingRegenDelay == false) {
+			regenBrakingDelaySince = HAL_GetTick();
+			waitingRegenDelay = true;
 			requestedTorque = 0;
-		} else {
+		//if it's been long enough and car is still fast enough, start regen braking
+		} else if (HAL_GetTick() - regenBrakingDelaySince > REGEN_BRK_DELAY_TIME && inverter_diagnostics.carSpeed > 5.0f
+					&& VCUMODE != CALIBRATE_PEDALS && waitingRegenDelay == true) {
 			//			float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
 			requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)
-					* ((APPS_INFLECTION_PERCENT - appsValue)
-							/ APPS_INFLECTION_PERCENT);
+										* ((APPS_INFLECTION_PERCENT - appsValue)
+												/ APPS_INFLECTION_PERCENT);
+		} else {
+
+			requestedTorque = 0;
+
 		}
+#endif
+
 	}
 }
 
@@ -1170,7 +1194,7 @@ void calibratePedalsMain(void) {
 	while (1) {
 		if(dma_read_complete){
 //			__disable_irq(); // SLIME THIS OUT!!!!!
-			HAL_ADC_Stop_DMA(&hadc1);
+//			HAL_ADC_Stop_DMA(&hadc1);
 			millis_since_dma_read = HAL_GetTick();
 			//
 			//			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
@@ -1191,13 +1215,13 @@ void calibratePedalsMain(void) {
 			//			finalTorqueRequest   = requestedTorque;
 			//			lastRequestedTorque  = requestedTorque;
 			if (HAL_GetTick() - lastCalcReadsPerSecTime > 100) {
-				readsPer100ms = readsPer100msCounter*10; //convert to reads per second
+				readsPer100ms = readsPer100msCounter*10 / ((HAL_GetTick() - lastCalcReadsPerSecTime)/100); //convert to reads per second
 				readsPer100msCounter = 0;
 				lastCalcReadsPerSecTime = HAL_GetTick();
 			}
 			dma_read_complete = 0;
 //			__enable_irq();
-			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+//			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
 			//			sendDebugTorqueCommand();
 			// SLIME THIS OUT!!!
 		}
@@ -1403,9 +1427,10 @@ int main(void)
 
 	if (VCUMODE == DRIVE) {
 		/* DRIVE LOOP */
+		lastCalcReadsPerSecTime = HAL_GetTick();
 		while (1) {
 
-			if (!readyToDrive) {
+			if (!readyToDrive) { //is there a way to stop checking this every time
 				lookForRTD();
 			}
 			//
@@ -1421,6 +1446,13 @@ int main(void)
 					sendTorqueCommand();
 					//				sendFanCommand();
 				}
+#if ALLOW_PEDAL_READ_FREQ_DEBUG == 1
+				if (HAL_GetTick() - lastCalcReadsPerSecTime > 100) {
+					readsPer100ms = readsPer100msCounter*10 / ((HAL_GetTick() - lastCalcReadsPerSecTime)/100); //convert to reads per second
+					readsPer100msCounter = 0;
+					lastCalcReadsPerSecTime = HAL_GetTick();
+				}
+#endif
 				dma_read_complete = 0;
 			}
 
