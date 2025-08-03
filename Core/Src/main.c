@@ -137,6 +137,8 @@ PedalBounds APPS1Bounds;
 PedalBounds APPS2Bounds;
 //struct to store max and min of the BSE
 PedalBounds BSEBounds;
+//variable to store the last time it calculated reads per second, used to figure when to calculate the 100ms shit
+uint32_t lastCalcReadsPerSecTime = 0;
 #endif
 
 /* **** GLOBAL VARIABLES TO READ AND STORE RAW ADC COUNTS OF PEDAL SENSORS **** */
@@ -1173,7 +1175,6 @@ void AIRUnweldHelper(void) {
 }
 
 #if VCUMODE == CALIBRATE_PEDALS
-uint32_t lastCalcReadsPerSecTime = 0;
 void calibratePedalsMain(void) {
 	//	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
 	//		if(dma_read_complete){
