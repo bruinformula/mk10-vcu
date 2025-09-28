@@ -592,7 +592,8 @@ void calculateTorqueRequest(void) {
 	if (appsValue >= APPS_INFLECTION_PERCENT) { //apps travel is in range for forward torque
 		waitingRegenDelay = false; //restart delay counter thingy
 		requestedTorque = ((float) (MAX_TORQUE - MIN_TORQUE))
-				* (appsValue - APPS_INFLECTION_PERCENT);
+				* ((appsValue - APPS_INFLECTION_PERCENT)/(1-APPS_INFLECTION_PERCENT));
+		//(appsValue - APPS_INFLECTION_PERCENT)/(1-APPS_INFLECTION_PERCENT) normalizes the travel to whatever the leftover percentage above APPS_NFLECTION_PERCENT is, this way u dont have todo weird torque limits
 
 		if (requestedTorque >= MAX_TORQUE) {
 			requestedTorque = MAX_TORQUE;
