@@ -36,9 +36,14 @@
  * UNWELD_AIRS : flicker both airs and precharge relay one by one
  * CALIBRATE_PEDALS : calibrate pedals. put apps1_as_percent, apps1Value, apps2_as_percent, apps_plausible, readsPer100ms, etc.
  * CAN_TEST : test can :skull:
+<<<<<<< HEAD
  * VCUMODE_DEBUG : idfk you choose
  */
 #define VCUMODE DRIVE
+=======
+*/
+#define VCUMODE CALIBRATE_PEDALS
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 
 // allow debugging of SPECIFICALLY regen delay. set this to true while in vcumode == calibratepedals
 #define ALLOW_REGEN_DELAY_DEBUG 1
@@ -148,11 +153,31 @@ uint32_t ADC_Reads[ADC_BUFFER];
 volatile uint32_t apps1Value = 0;
 //raw analog counts of apps2
 volatile uint32_t apps2Value = 0;
+<<<<<<< HEAD
 //raw analog counts of the BSE
 volatile uint32_t bseValue = 0;
 //callback variable to tell main method that a DMA transfer has finished. no longer used to call various methods in the main methods
 uint8_t dma_read_complete = 1;
 //time since the last DMA read
+=======
+volatile uint32_t bseValue   = 0;
+
+// Torque variables
+uint32_t apps1Buffer[ADC_READ_BUFFER] = {0};
+uint32_t apps2Buffer[ADC_READ_BUFFER] = {0};
+uint32_t bseBuffer[ADC_READ_BUFFER]   = {0};
+uint8_t adcBufferIndex = 0;
+
+float requestedTorque;
+float lastRequestedTorque = 0;
+float finalTorqueRequest;
+uint8_t beginTorqueRequests = false;
+
+// APPS plausibility
+uint16_t apps_plausible = true;
+uint32_t millis_since_apps_implausible;
+volatile uint8_t  dma_read_complete = 1;
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 uint32_t millis_since_dma_read = 0;
 
 /* **** GLOBAL BUFFERS FOR EACH APPS. USED TO COMPUTE MEDIAN FILTER **** */
@@ -197,8 +222,15 @@ float apps2_as_percent = 0;
 //brake pedal travel represented as a %
 float bse_as_percent = 0;
 
+<<<<<<< HEAD
 /* **** GLOBAL VARIABLES THAT STORE VARIOUS STARTUP LOGIC PARAMETERS **** */
 //if car is ready to drive; precharged, driver consented, SDC closed, etc.
+=======
+static float apps1Filt = 0, apps2Filt = 0, bseFilt = 0;
+
+
+// startup logic global variables
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 uint8_t readyToDrive = false;
 //temporary variable that is 1 if just waiting for a lonng enough button press on the RTD button
 uint8_t rtdState = false;
@@ -471,6 +503,7 @@ void updateInverterVolts(void) {
  */
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
+<<<<<<< HEAD
 
 #if VCUMODE == CALIBRATE_PEDALS || ALLOW_PEDAL_READ_FREQ_DEBUG == 1
 	readsPer100msCounter++;
@@ -479,10 +512,25 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK - 1];
 	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK - 1];
 	bseBuffer[adcBufferIndex] = ADC_Reads[BSE_RANK - 1];
+=======
+//	// Store latest samples into buffers
+//	apps1Buffer[adcBufferIndex] = ADC_Reads[APPS1_RANK-1];
+//	apps2Buffer[adcBufferIndex] = ADC_Reads[APPS2_RANK-1];
+//	bseBuffer[adcBufferIndex]   = ADC_Reads[BSE_RANK-1];
+//
+//	// Move buffer index circularly
+//	adcBufferIndex = (adcBufferIndex + 1) % ADC_READ_BUFFER;
+//
+//	// Compute and assign median
+//	apps1Value = median_uint32_t(apps1Buffer, ADC_READ_BUFFER);
+//	apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
+//	bseValue   = median_uint32_t(bseBuffer, ADC_READ_BUFFER);
+//
+//	dma_read_complete = 1;
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 
-	// Move buffer index circularly
-	adcBufferIndex = (adcBufferIndex + 1) % ADC_READ_BUFFER;
 
+<<<<<<< HEAD
 	// Compute and assign median
 	apps1Value = median_uint32_t(apps1Buffer, ADC_READ_BUFFER);
 	apps2Value = median_uint32_t(apps2Buffer, ADC_READ_BUFFER);
@@ -514,6 +562,20 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 	} else {
 		finalTorqueRequest = 0;
 	}
+=======
+	/* Grab raw samples */
+	apps1Value = ADC_Reads[APPS1_RANK-1];
+	apps2Value = ADC_Reads[APPS2_RANK-1];
+	bseValue   = ADC_Reads[BSE_RANK-1];
+
+	/* Fast 1-pole IIR (α = 0.25) gives ~2-sample latency */
+	apps1Filt += 0.25f * ((float)apps1Value - apps1Filt);
+	apps2Filt += 0.25f * ((float)apps2Value - apps2Filt);
+	bseFilt   += 0.25f * ((float)bseValue   - bseFilt);
+	apps1Value = (uint32_t)apps1Filt;
+	apps2Value = (uint32_t)apps2Filt;
+	bseValue   = (uint32_t)bseFilt;
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 
 	dma_read_complete = 1;
 }
@@ -569,6 +631,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 //}
 volatile float appsValue;
 
+<<<<<<< HEAD
 /**
  * @brief calculate torque request using one-pedal driving control scheme
  *
@@ -594,10 +657,79 @@ void calculateTorqueRequest(void) {
 		requestedTorque = ((float) (MAX_TORQUE - MIN_TORQUE))
 				* ((appsValue - APPS_INFLECTION_PERCENT)/(1-APPS_INFLECTION_PERCENT));
 		//(appsValue - APPS_INFLECTION_PERCENT)/(1-APPS_INFLECTION_PERCENT) normalizes the travel to whatever the leftover percentage above APPS_NFLECTION_PERCENT is, this way u dont have todo weird torque limits
+=======
+/*
+ * PEDAL_MAP
+ * 0 is braindead
+ * 1 is skidpad; looks like x^3 function ish
+ * 2 is some weird shit i cooked up for endurance, control at low-med throttle and
+ */
 
-		if (requestedTorque >= MAX_TORQUE) {
-			requestedTorque = MAX_TORQUE;
+#define PEDAL_MAP 0
+
+#define MAP_SIZE 10
+
+typedef struct {
+    float throttle;     // x value
+    float torque;       // y value
+} ThrottleTorquePair;
+
+const static ThrottleTorquePair torqueMap[20] = {
+    { 0,  -30 },
+    { 0.05, -10 },
+    {0.10, 0 },
+    {0.15, 5 },
+    {0.20, 10 },
+    {0.25, 15 },
+    {0.30, 25 },
+    {0.35, 35 },
+    {0.40, 45 },
+    {0.45, 55 },
+    {0.50, 65 },
+    {0.55, 68 },
+    {0.60, 70 },
+    {0.65, 75 },
+	{0.70, 80 },
+	{0.75, 85 },
+	{0.80, 90 },
+	{0.85, 95 },
+	{0.90, 100 },
+	{0.95, 120 },
+	{1	 , 125}
+};
+
+uint16_t throttlePoint0;
+uint16_t throttlePoint1;
+uint16_t torquePoint0;
+uint16_t torquePoint1;
+float pedalMapCurrSlope = 0;
+
+
+void calculateTorqueRequest(void)
+{
+	float apps1_as_percent = ((float)apps1Value-APPS_1_ADC_MIN_VAL)/(APPS_1_ADC_MAX_VAL-APPS_1_ADC_MIN_VAL);
+	float apps2_as_percent = ((float)apps2Value-APPS_2_ADC_MIN_VAL)/(APPS_2_ADC_MAX_VAL-APPS_2_ADC_MIN_VAL);
+	float appsValue = ((float)apps1_as_percent + apps2_as_percent)/2;
+	if (!apps_plausible && !cross_check_plausible) {
+		requestedTorque = 0;
+	}
+#if	PEDAL_MAP == 0
+		if(appsValue >= 0){ //apps travel is in range for forward torque
+			requestedTorque = ((float)(MAX_TORQUE-MIN_TORQUE)) * appsValue + MIN_TORQUE;
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
+
+			if (requestedTorque >= MAX_TORQUE) {
+				requestedTorque = MAX_TORQUE;
+			}
+		} else { //apps travel is in range for reverse torque
+			if (inverter_diagnostics.carSpeed < 5.0f) {
+				requestedTorque = 0;
+			} else {
+				float bse_as_percent = ((float)bseValue-BSE_ADC_MIN_VAL)/(BSE_ADC_MAX_VAL-BSE_ADC_MIN_VAL);
+				requestedTorque = (REGEN_MAX_TORQUE - REGEN_BASELINE_TORQUE)*bse_as_percent + REGEN_BASELINE_TORQUE;
+			}
 		}
+<<<<<<< HEAD
 	} else { //apps travel is in range for reverse torque
 #if VCUMODE != CALIBRATE_PEDALS || ALLOW_REGEN_DELAY_DEBUG == 1//if its in calibrate_pedals you wanna see regenerative torque request so show that
 		//should start waiting to allow torque requests
@@ -661,7 +793,40 @@ void checkAPPSPlausibility(void) {
 	else if (pedalTravelDiffPercent < APPS_IMPLAUSIBILITY_PERCENT_DIFFERENCE) {
 		apps_plausible = 1;
 	}
+=======
+#elif PEDAL_MAP == 2
+		// Search for bounding points
+		    for (int i = 0; i < MAP_SIZE - 1; i++) {
+		    	throttlePoint0 = torqueMap[i].throttle;
+		    	throttlePoint1 = torqueMap[i + 1].throttle;
+
+
+		        if (inputThrottle >= throttlePoint0 && inputThrottle <= throttlePoint1) {
+		        	torquePoint0 = torqueMap[i].torque;
+					torquePoint1 = torqueMap[i + 1].torque;
+		            // Interpolate
+					pedalMapCurrSlope = (float)(torquePoint1 - torquePoint0) / (throttlePoint1 - throttlePoint0);
+		            requestedTorque = torquePoint0 + pedalMapCurrSlope * (inputThrottle - throttlePoint0);
+		        }
+		    }
+
+		    // Extrapolation below range
+		    if (inputThrottle < torqueMap[0].throttle) {
+		       requestedTorque = torqueMap[0].torque;
+		    }
+
+		    // Extrapolation above range
+		    if (inputThrottle > torqueMap[MAP_SIZE - 1].throttle) {
+		        requestedTorque = torqueMap[MAP_SIZE - 1].torque;
+		    }
+
+#endif
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 }
+
+
+
+
 
 /**
  * @brief Check plausibility of APPS sensors.
@@ -768,6 +933,13 @@ void sendDebugTorqueCommand(void) {
 		requestedTorque = MAX_TORQUE;
 	}
 
+<<<<<<< HEAD
+=======
+	if (!apps_plausible && !cross_check_plausible) {
+		requestedTorque = 0;
+	}
+
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 	int torqueValue = (int) (requestedTorque * 10); // Convert to integer, multiply by 10
 
 	// Break the torqueValue into two bytes (little-endian)
@@ -780,6 +952,7 @@ void sendDebugTorqueCommand(void) {
 	torqueRequestMessage.frame.id     = 0x5C0;
 	torqueRequestMessage.frame.dlc    = 8;
 
+<<<<<<< HEAD
 	torqueRequestMessage.frame.data0 = msg0; //torque request
 	torqueRequestMessage.frame.data1 = msg1;
 	torqueRequestMessage.frame.data2 = 0; // speed request (only maters in speed mode)
@@ -791,6 +964,19 @@ void sendDebugTorqueCommand(void) {
 		torqueRequestMessage.frame.data5 = 1;
 	}else{
 		torqueRequestMessage.frame.data5 = 0;
+=======
+	txMessage.frame.data0 = msg0; //torque request
+	txMessage.frame.data1 = msg1;
+	txMessage.frame.data2 = 0; // speed request (only matters in speed mode)
+	txMessage.frame.data3 = 0;
+	txMessage.frame.data4 = 0; //direction
+
+	//lockout
+	if(beginTorqueRequests){
+		txMessage.frame.data5 = 1;
+	} else {
+		txMessage.frame.data5 = 0;
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 	}
 
 	torqueRequestMessage.frame.data6 = 0;
@@ -1100,7 +1286,11 @@ void lookForRTD(void) {
 			readFromCAN();
 		}
 
+<<<<<<< HEAD
 		if (dma_read_complete) {
+=======
+		if(dma_read_complete){
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
 		}
@@ -1177,6 +1367,7 @@ void AIRUnweldHelper(void) {
 
 #if VCUMODE == CALIBRATE_PEDALS
 void calibratePedalsMain(void) {
+<<<<<<< HEAD
 	//	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
 	//		if(dma_read_complete){
 	//
@@ -1184,6 +1375,14 @@ void calibratePedalsMain(void) {
 	//			millis_since_dma_read = HAL_GetTick();
 	//		}
 	//	}
+=======
+//	while (apps1Value == 0 || apps2Value == 0 || bseValue == 0) {
+//		if(dma_read_complete){
+//			dma_read_complete = 0;
+//			millis_since_dma_read = HAL_GetTick();
+//		}
+//	}
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 	APPS1Bounds.min = 4096;
 	APPS1Bounds.max = 0;
 	APPS2Bounds.min = 4096;
@@ -1195,6 +1394,7 @@ void calibratePedalsMain(void) {
 	uint8_t lastdmaread = HAL_GetTick();
 	while (1) {
 		if(dma_read_complete){
+<<<<<<< HEAD
 //			__disable_irq(); // SLIME THIS OUT!!!!!
 //			HAL_ADC_Stop_DMA(&hadc1);
 			millis_since_dma_read = HAL_GetTick();
@@ -1281,10 +1481,29 @@ void DebugMain(void) {
 
 		if (dma_read_complete) {
 			HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
+=======
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 			dma_read_complete = 0;
 			millis_since_dma_read = HAL_GetTick();
+			if (apps1Value > APPS1Bounds.max) APPS1Bounds.max = apps1Value;
+			else if (apps1Value < APPS1Bounds.min) APPS1Bounds.min = apps1Value;
+
+			if (apps2Value > APPS2Bounds.max) APPS2Bounds.max = apps2Value;
+			else if (apps2Value < APPS2Bounds.min) APPS2Bounds.min = apps2Value;
+
+			if (bseValue > BSEBounds.max) BSEBounds.max = bseValue;
+			else if (bseValue < BSEBounds.min) BSEBounds.min = bseValue;
+			calculateTorqueRequest();
+			checkAPPSPlausibility();
+			checkCrossCheck();
 		}
 
+<<<<<<< HEAD
+=======
+
+
+
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 	}
 
 }
@@ -1411,16 +1630,13 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-	if (VCUMODE == CALIBRATE_PEDALS) {
-		calibratePedalsMain();
-	}
-
-	if (VCUMODE == UNWELD_AIRS) {
+#if VCUMODE == CALIBRATE_PEDALS
+	calibratePedalsMain();
+#elif VCUMODE == UNWELD_AIRS
 		AIRUnweldHelper();
-	}
-
-	if (VCUMODE == CAN_TEST) {
+#elif VCUMODE == CAN_TEST
 		CANTestHelperMain();
+<<<<<<< HEAD
 	}
 
 	if (VCUMODE == DEBUG) {
@@ -1428,6 +1644,9 @@ int main(void)
 	}
 
 	if (VCUMODE == DRIVE) {
+=======
+#elif VCUMODE == DRIVE
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 		/* DRIVE LOOP */
 		lastCalcReadsPerSecTime = HAL_GetTick();
 		while (1) {
@@ -1443,6 +1662,7 @@ int main(void)
 
 			checkShutdown(); // If pin is low, torque->0, block and trigger system reset...
 
+<<<<<<< HEAD
 			if (dma_read_complete) {
 				if (readyToDrive || rtdoverride == 1) {
 					sendTorqueCommand();
@@ -1456,13 +1676,41 @@ int main(void)
 				}
 #endif
 				dma_read_complete = 0;
+=======
+			if(dma_read_complete){
+				dma_read_complete = 0;
+				millis_since_dma_read = HAL_GetTick();
+
+				// Periodically do your torque calculations:
+				calculateTorqueRequest();
+				checkAPPSPlausibility();
+				checkCrossCheck();
+				finalTorqueRequest   = requestedTorque;
+				lastRequestedTorque  = requestedTorque;
+
+
+
+				if (readyToDrive || rtdoverride == 1) {
+					sendTorqueCommand();
+					//				sendFanCommand();
+				}
+				sendDiagMsg();
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 			}
 
 			updateBMSDiagnostics();
+<<<<<<< HEAD
 			sendDiagMsg();
+=======
+			checkShutdown();  // If pin is low, torque->0, block
+
+
+
+
+>>>>>>> 2e17d31bf252647cd113dd1a64ff310801a199a5
 			// ... do other tasks as needed ...
 		}
-	}
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1584,6 +1832,8 @@ static void MX_ADC1_Init(void)
   }
   /* USER CODE BEGIN ADC1_Init 2 */
 
+
+	HAL_ADC_Start_DMA(&hadc1, ADC_Reads, ADC_BUFFER);
   /* USER CODE END ADC1_Init 2 */
 
 }
