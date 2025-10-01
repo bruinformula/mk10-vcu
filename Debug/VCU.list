@@ -39,15 +39,15 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  17 .debug_line   00015210  00000000  00000000  000a792e  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    0009ce48  00000000  00000000  000bcb3e  2**0
+ 18 .debug_str    0009ce5f  00000000  00000000  000bcb3e  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  00159986  2**0
+ 19 .comment      00000043  00000000  00000000  0015999d  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  0000487c  00000000  00000000  001599cc  2**2
+ 20 .debug_frame  0000487c  00000000  00000000  001599e0  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_loclists 00000461  00000000  00000000  0015e248  2**0
+ 21 .debug_loclists 00000461  00000000  00000000  0015e25c  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 22 .debug_line_str 00000055  00000000  00000000  0015e6a9  2**0
+ 22 .debug_line_str 0000006c  00000000  00000000  0015e6bd  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -3469,15 +3469,15 @@ void Error_Handler(void)
 		uint32_t start = HAL_GetTick();
  8001ad0:	f000 fd3e 	bl	8002550 <HAL_GetTick>
  8001ad4:	4606      	mov	r6, r0
-		while ((HAL_GetTick() - start) < 20000) {
+		while ((HAL_GetTick() - start) < 5000) {
  8001ad6:	e002      	b.n	8001ade <main+0x52>
 			HAL_Delay(10);
  8001ad8:	200a      	movs	r0, #10
  8001ada:	f000 fd45 	bl	8002568 <HAL_Delay>
-		while ((HAL_GetTick() - start) < 20000) {
+		while ((HAL_GetTick() - start) < 5000) {
  8001ade:	f000 fd37 	bl	8002550 <HAL_GetTick>
  8001ae2:	1b80      	subs	r0, r0, r6
- 8001ae4:	f644 631f 	movw	r3, #19999	@ 0x4e1f
+ 8001ae4:	f241 3387 	movw	r3, #4999	@ 0x1387
  8001ae8:	4298      	cmp	r0, r3
  8001aea:	d80d      	bhi.n	8001b08 <main+0x7c>
 			BMSFaultState = HAL_GPIO_ReadPin(BMS_FAULT_GPIO_Port,
